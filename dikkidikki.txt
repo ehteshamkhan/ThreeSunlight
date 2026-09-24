@@ -1,0 +1,655 @@
+#requires -Version 5.1
+
+$ErrorActionPreference = "Stop"
+
+# ============================================================
+# THREE SUNLIGHT
+# FIX COMPILED CITY INSTANCED BUILDING DIMENSIONS
+# ============================================================
+#
+# Problem:
+#   The current InstancedMesh uses one enormous shared
+#   684 x 352 x 684 BoxGeometry and every instance has
+#   scale 1,1,1.
+#
+# Correct architecture:
+#   Shared geometry = 1 x 1 x 1
+#   Each building instance = 9.6 x 23.1 x 9.6
+#
+# This preserves:
+#   - 4,809 buildings
+#   - one shared InstancedMesh
+#   - one shared geometry
+#   - one shared material
+#   - existing anchors
+#   - existing facade system
+#   - existing collision system
+#   - existing lazy loading
+#   - existing four-sided facade lifecycle
+#   - existing newsreel animation
+#   - existing camera / controls
+#
+# ============================================================
+
+$ProjectRoot = "C:\ThreeSunlight"
+$MainFile    = Join-Path $ProjectRoot "src\main.js"
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host " THREE SUNLIGHT - COMPILED CITY BUILDING DIMENSION FIX" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
+
+if (-not (Test-Path -LiteralPath $MainFile)) {
+    throw "main.js was not found: $MainFile"
+}
+
+# ============================================================
+# READ SOURCE
+# ============================================================
+
+Write-Host "[1/7] Reading main.js..." -ForegroundColor Yellow
+
+$source = [System.IO.File]::ReadAllText(
+    $MainFile,
+    [System.Text.Encoding]::UTF8
+)
+
+Write-Host "      Characters: $($source.Length)" -ForegroundColor Gray
+
+# ============================================================
+# VERIFY CURRENT BUILDING FUNCTION EXISTS
+# ============================================================
+
+Write-Host "[2/7] Locating compiledCityCreateBuildings()..." -ForegroundColor Yellow
+
+$functionStartMarker =
+    "function compiledCityCreateBuildings() {"
+
+$functionEndMarker =
+    "// ============================================================" +
+    "`r`n// FIND CLOSEST BUILDING SIDE"
+
+$functionEndMarkerLf =
+    "// ============================================================" +
+    "`n// FIND CLOSEST BUILDING SIDE"
+
+$startIndex = $source.IndexOf(
+    $functionStartMarker,
+    [System.StringComparison]::Ordinal
+)
+
+if ($startIndex -lt 0) {
+    throw "Could not find compiledCityCreateBuildings() in main.js."
+}
+
+$endIndex = $source.IndexOf(
+    $functionEndMarker,
+    $startIndex,
+    [System.StringComparison]::Ordinal
+)
+
+$endMarkerLength = $functionEndMarker.Length
+
+if ($endIndex -lt 0) {
+    $endIndex = $source.IndexOf(
+        $functionEndMarkerLf,
+        $startIndex,
+        [System.StringComparison]::Ordinal
+    )
+
+    $endMarkerLength = $functionEndMarkerLf.Length
+}
+
+if ($endIndex -lt 0) {
+    throw "Could not find the end of compiledCityCreateBuildings()."
+}
+
+$oldFunctionLength =
+    $endIndex - $startIndex
+
+Write-Host "      Function located." -ForegroundColor Green
+Write-Host "      Existing function length: $oldFunctionLength characters" -ForegroundColor Gray
+
+# ============================================================
+# BACKUP
+# ============================================================
+
+Write-Host "[3/7] Creating backup..." -ForegroundColor Yellow
+
+$timestamp =
+    Get-Date -Format "yyyyMMdd-HHmmss"
+
+$backupFile =
+    Join-Path `
+        $ProjectRoot `
+        "src\main.js.before-building-dimension-fix-$timestamp.bak"
+
+[System.IO.File]::WriteAllText(
+    $backupFile,
+    $source,
+    [System.Text.Encoding]::UTF8
+)
+
+Write-Host "      Backup created:" -ForegroundColor Green
+Write-Host "      $backupFile" -ForegroundColor Gray
+
+# ============================================================
+# CORRECTED FUNCTION
+# ============================================================
+
+Write-Host "[4/7] Building corrected InstancedMesh function..." -ForegroundColor Yellow
+
+$newFunction = @'
+function compiledCityCreateBuildings() {
+
+    if (
+        !compiledCitySections ||
+        compiledCitySections.length === 0
+    ) {
+        return;
+    }
+
+    /*
+     * ========================================================
+     * COMPACT BUILDING DIMENSIONS
+     * ========================================================
+     *
+     * The city grid spacing is 22 units.
+     *
+     * Buildings therefore must remain substantially smaller
+     * than one grid cell.
+     *
+     * Intended building dimensions:
+     *
+     *     width  = 9.6
+     *     depth  = 9.6
+     *     height = 23.1
+     *
+     * The old instanced implementation incorrectly created:
+     *
+     *     684 x 352 x 684
+     *
+     * and then used instance scale 1,1,1.
+     *
+     * That caused the buildings to overlap enormous portions
+     * of the city and made them appear as one giant object.
+     */
+
+    const buildingWidth =
+        9.6;
+
+    const buildingDepth =
+        9.6;
+
+    const buildingHeight =
+        23.1;
+
+    /*
+     * ========================================================
+     * ONE UNIT SHARED GEOMETRY
+     * ========================================================
+     *
+     * Every instance receives its real dimensions through
+     * its instance matrix.
+     *
+     * This keeps ONE geometry shared by all 4,809 buildings.
+     */
+
+    const sharedBuildingGeometry =
+        new THREE.BoxGeometry(
+            1,
+            1,
+            1
+        );
+
+    const sharedBuildingMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x20252b,
+            roughness: 0.78,
+            metalness: 0.08
+        });
+
+    const totalBuildings =
+        compiledCitySections.length;
+
+    const instancedBuildings =
+        new THREE.InstancedMesh(
+            sharedBuildingGeometry,
+            sharedBuildingMaterial,
+            totalBuildings
+        );
+
+    instancedBuildings.name =
+        "CompiledCityBuildingsInstanced";
+
+    const dummy =
+        new THREE.Object3D();
+
+    compiledCityBuildings = [];
+
+    for (
+        let index = 0;
+        index < totalBuildings;
+        index++
+    ) {
+
+        /*
+         * ====================================================
+         * GRID POSITION
+         * ====================================================
+         */
+
+        const column =
+            index %
+            COMPILED_CITY_GRID_COLUMNS;
+
+        const row =
+            Math.floor(
+                index /
+                COMPILED_CITY_GRID_COLUMNS
+            );
+
+        const x =
+            (
+                column -
+                (COMPILED_CITY_GRID_COLUMNS - 1) / 2
+            ) *
+            COMPILED_CITY_GRID_SPACING;
+
+        const z =
+            (
+                row -
+                Math.floor(
+                    totalBuildings /
+                    COMPILED_CITY_GRID_COLUMNS
+                ) / 2
+            ) *
+            COMPILED_CITY_GRID_SPACING;
+
+        /*
+         * ====================================================
+         * INSTANCE TRANSFORM
+         * ====================================================
+         *
+         * BoxGeometry is centered around its origin.
+         *
+         * Scaling:
+         *
+         *     X = 9.6
+         *     Y = 23.1
+         *     Z = 9.6
+         *
+         * Translation:
+         *
+         *     X = building center
+         *     Y = half building height
+         *     Z = building center
+         *
+         * Therefore the building bottom remains exactly at
+         * world Y = 0.
+         */
+
+        dummy.position.set(
+            x,
+            buildingHeight / 2,
+            z
+        );
+
+        dummy.rotation.set(
+            0,
+            0,
+            0
+        );
+
+        dummy.scale.set(
+            buildingWidth,
+            buildingHeight,
+            buildingDepth
+        );
+
+        dummy.updateMatrix();
+
+        instancedBuildings.setMatrixAt(
+            index,
+            dummy.matrix
+        );
+
+        /*
+         * ====================================================
+         * BUILDING ANCHOR
+         * ====================================================
+         *
+         * Keep the existing anchor architecture intact.
+         *
+         * Facades are attached to these anchors rather than
+         * directly to the InstancedMesh.
+         */
+
+        const anchor =
+            new THREE.Group();
+
+        anchor.position.set(
+            x,
+            0,
+            z
+        );
+
+        scene.add(
+            anchor
+        );
+
+        /*
+         * ====================================================
+         * BUILDING RECORD
+         * ====================================================
+         *
+         * IMPORTANT:
+         *
+         * width/depth/height exactly match the rendered
+         * instance dimensions.
+         *
+         * Collision uses these values.
+         *
+         * Facade placement also uses these values.
+         */
+
+        const building = {
+            index,
+            instanceId: index,
+
+            x,
+            y: 0,
+            z,
+
+            mesh:
+                instancedBuildings,
+
+            anchor,
+
+            width:
+                buildingWidth,
+
+            depth:
+                buildingDepth,
+
+            height:
+                buildingHeight,
+
+            facade:
+                null,
+
+            facades:
+                [],
+
+            texture:
+                null,
+
+            canvas:
+                null,
+
+            context:
+                null,
+
+            material:
+                sharedBuildingMaterial,
+
+            geometry:
+                sharedBuildingGeometry,
+
+            facadeMaterials:
+                [],
+
+            facadeTextures:
+                [],
+
+            facadeCanvases:
+                [],
+
+            facadeContexts:
+                [],
+
+            facadeGeometries:
+                []
+        };
+
+        compiledCityBuildings.push(
+            building
+        );
+    }
+
+    /*
+     * Tell Three.js that all instance transforms are ready.
+     */
+
+    instancedBuildings.instanceMatrix.needsUpdate =
+        true;
+
+    /*
+     * Rebuild the InstancedMesh bounds from the actual
+     * transformed instances.
+     */
+
+    instancedBuildings.computeBoundingBox();
+    instancedBuildings.computeBoundingSphere();
+
+    /*
+     * Add exactly one shared building mesh to the scene.
+     */
+
+    scene.add(
+        instancedBuildings
+    );
+}
+'@
+
+# ============================================================
+# REPLACE FUNCTION
+# ============================================================
+
+Write-Host "[5/7] Replacing building creation function..." -ForegroundColor Yellow
+
+$prefix =
+    $source.Substring(
+        0,
+        $startIndex
+    )
+
+$suffix =
+    $source.Substring(
+        $endIndex,
+        $source.Length - $endIndex
+    )
+
+$newSource =
+    $prefix +
+    $newFunction +
+    "`r`n`r`n" +
+    $suffix
+
+# ============================================================
+# WRITE SOURCE
+# ============================================================
+
+Write-Host "[6/7] Writing corrected main.js..." -ForegroundColor Yellow
+
+[System.IO.File]::WriteAllText(
+    $MainFile,
+    $newSource,
+    [System.Text.Encoding]::UTF8
+)
+
+Write-Host "      main.js updated successfully." -ForegroundColor Green
+
+# ============================================================
+# VALIDATION
+# ============================================================
+
+Write-Host "[7/7] Validating corrected source..." -ForegroundColor Yellow
+
+$verify =
+    [System.IO.File]::ReadAllText(
+        $MainFile,
+        [System.Text.Encoding]::UTF8
+    )
+
+$checks = @(
+    @{
+        Name = "InstancedMesh exists"
+        Pattern = "new THREE.InstancedMesh"
+    },
+    @{
+        Name = "Unit shared geometry"
+        Pattern = "new THREE.BoxGeometry(`r`n            1,`r`n            1,`r`n            1"
+    },
+    @{
+        Name = "Width 9.6"
+        Pattern = "const buildingWidth =`r`n        9.6"
+    },
+    @{
+        Name = "Depth 9.6"
+        Pattern = "const buildingDepth =`r`n        9.6"
+    },
+    @{
+        Name = "Height 23.1"
+        Pattern = "const buildingHeight =`r`n        23.1"
+    },
+    @{
+        Name = "Per-instance width scale"
+        Pattern = "dummy.scale.set(`r`n            buildingWidth,`r`n            buildingHeight,`r`n            buildingDepth"
+    },
+    @{
+        Name = "Instance matrix update"
+        Pattern = "instancedBuildings.instanceMatrix.needsUpdate"
+    },
+    @{
+        Name = "Bounding box computation"
+        Pattern = "instancedBuildings.computeBoundingBox()"
+    },
+    @{
+        Name = "Bounding sphere computation"
+        Pattern = "instancedBuildings.computeBoundingSphere()"
+    },
+    @{
+        Name = "Building width synchronized"
+        Pattern = "width:`r`n                buildingWidth"
+    },
+    @{
+        Name = "Building depth synchronized"
+        Pattern = "depth:`r`n                buildingDepth"
+    },
+    @{
+        Name = "Building height synchronized"
+        Pattern = "height:`r`n                buildingHeight"
+    },
+    @{
+        Name = "Facade placement preserved"
+        Pattern = "function compiledCityPlaceFacade("
+    },
+    @{
+        Name = "Collision preserved"
+        Pattern = "function compiledCityResolveBuildingCollision("
+    },
+    @{
+        Name = "Lazy facade update preserved"
+        Pattern = "function compiledCityUpdateFacades("
+    },
+    @{
+        Name = "Four-sided facade system preserved"
+        Pattern = "function compiledCityStartNewsreelAnimation("
+    }
+)
+
+$passed = 0
+$failed = 0
+
+foreach ($check in $checks) {
+
+    if (
+        $verify.Contains(
+            $check.Pattern
+        )
+    ) {
+
+        Write-Host (
+            "      [OK] " +
+            $check.Name
+        ) -ForegroundColor Green
+
+        $passed++
+    }
+    else {
+
+        Write-Host (
+            "      [FAIL] " +
+            $check.Name
+        ) -ForegroundColor Red
+
+        $failed++
+    }
+}
+
+# ============================================================
+# CHECK FOR DUPLICATE BUILDING FUNCTION DEFINITIONS
+# ============================================================
+
+$functionCount =
+    [regex]::Matches(
+        $verify,
+        'function\s+compiledCityCreateBuildings\s*\('
+    ).Count
+
+if ($functionCount -eq 1) {
+
+    Write-Host "      [OK] Exactly one compiledCityCreateBuildings() definition" -ForegroundColor Green
+    $passed++
+}
+else {
+
+    Write-Host "      [FAIL] Found $functionCount compiledCityCreateBuildings() definitions" -ForegroundColor Red
+    $failed++
+}
+
+# ============================================================
+# FINAL RESULT
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host " VALIDATION RESULT" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "Passed: $passed" -ForegroundColor Green
+Write-Host "Failed: $failed" -ForegroundColor $(if ($failed -eq 0) { "Green" } else { "Red" })
+
+Write-Host ""
+Write-Host "Backup:" -ForegroundColor Yellow
+Write-Host $backupFile -ForegroundColor Gray
+
+Write-Host ""
+Write-Host "Updated:" -ForegroundColor Yellow
+Write-Host $MainFile -ForegroundColor Gray
+
+if ($failed -gt 0) {
+
+    Write-Host ""
+    Write-Host "WARNING: Validation detected one or more failures." -ForegroundColor Red
+    Write-Host "The original source backup is available above." -ForegroundColor Red
+
+    exit 1
+}
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host " BUILDING DIMENSION FIX COMPLETE" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Instanced building geometry: 1 x 1 x 1" -ForegroundColor Gray
+Write-Host "Instance dimensions:          9.6 x 23.1 x 9.6" -ForegroundColor Gray
+Write-Host "Grid spacing:                 22" -ForegroundColor Gray
+Write-Host "Building count:               4,809 (from compiled data)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Collision dimensions and facade dimensions now use" -ForegroundColor Gray
+Write-Host "the same 9.6 x 23.1 x 9.6 physical building dimensions." -ForegroundColor Gray
+Write-Host ""

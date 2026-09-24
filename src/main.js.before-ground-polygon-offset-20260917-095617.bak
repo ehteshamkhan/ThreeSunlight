@@ -1,0 +1,4622 @@
+import * as THREE from 'three/webgpu';
+
+import {
+    color,
+    cos,
+    float,
+    mix,
+    range,
+    sin,
+    time,
+    uniform,
+    uv,
+    vec3,
+    vec4,
+    TWO_PI
+} from 'three/tsl';
+
+import {
+    FirstPersonControls
+} from 'three/addons/controls/FirstPersonControls.js';
+
+import {
+    Inspector
+} from 'three/addons/inspector/Inspector.js';
+
+import {
+    SunLight
+} from 'three/addons/lights/SunLight.js';
+
+import {
+    SunLightNode
+} from 'three/addons/lights/SunLightNode.js';
+
+import './style.css';
+
+let renderer;
+let scene;
+let camera;
+let controls;
+let timer;
+let sunLight;
+/* THREE SUNLIGHT - CINEMATIC EMERALD THEME START */
+
+/*
+ * ============================================================
+ * CINEMATIC EMERALD + DEEP BLUE VISUAL SYSTEM
+ * ============================================================
+ *
+ * Buildings:
+ *   Deep blue / emerald
+ *   Metallic response
+ *   Subtle emerald emissive accent
+ *
+ * Ground:
+ *   Dark emerald
+ *   Slight blue undertone
+ *   High roughness
+ *
+ * This changes visual materials only.
+ *
+ * Existing:
+ *   building dimensions
+ *   building positions
+ *   facades
+ *   collision
+ *   camera
+ *   X/Z boundary
+ *   Y ground protection
+ *   sky
+ *   forest
+ *   sun
+ *
+ * remain untouched.
+ */
+
+
+/* ============================================================
+ * CINEMATIC BUILDING MATERIAL
+ * ============================================================ */
+
+const THREE_SUNLIGHT_BUILDING_COLOR =
+    0x071d2b;
+
+const THREE_SUNLIGHT_BUILDING_EMISSIVE =
+    0x063f38;
+
+
+const threeSunlightCinematicBuildingMaterial =
+    new THREE.MeshStandardMaterial({
+
+        color:
+            THREE_SUNLIGHT_BUILDING_COLOR,
+
+        emissive:
+            THREE_SUNLIGHT_BUILDING_EMISSIVE,
+
+        emissiveIntensity:
+            0.22,
+
+        roughness:
+            0.48,
+
+        metalness:
+            0.62,
+
+        side:
+            THREE.FrontSide
+    });
+
+
+/*
+ * Apply the cinematic building material to the
+ * existing compiled-city InstancedMesh.
+ *
+ * No geometry is changed.
+ */
+function threeSunlightApplyCinematicBuildingMaterial() {
+
+    if (
+        typeof instancedBuildings === 'undefined' ||
+        !instancedBuildings
+    ) {
+
+        console.warn(
+            'Three Sunlight: compiled building mesh unavailable for cinematic material.'
+        );
+
+        return;
+    }
+
+
+    instancedBuildings.material =
+        threeSunlightCinematicBuildingMaterial;
+
+
+    instancedBuildings.material.needsUpdate =
+        true;
+
+
+    console.log(
+        'Three Sunlight: CINEMATIC EMERALD / DEEP BLUE BUILDINGS ACTIVE'
+    );
+}
+
+
+/* ============================================================
+ * GROUND MATERIAL
+ * ============================================================ */
+
+const THREE_SUNLIGHT_GROUND_COLOR =
+    0x071f1a;
+
+const THREE_SUNLIGHT_GROUND_EMISSIVE =
+    0x021812;
+
+
+/*
+ * Large ground surface.
+ *
+ * It sits exactly at world Y = 0,
+ * matching the bottom of the compiled buildings.
+ */
+let threeSunlightCinematicGround = null;
+
+
+function threeSunlightCreateCinematicGround() {
+
+    if (
+        threeSunlightCinematicGround
+    ) {
+        return;
+    }
+
+
+    const groundSize =
+        12000;
+
+
+    const groundGeometry =
+        new THREE.PlaneGeometry(
+            groundSize,
+            groundSize,
+            1,
+            1
+        );
+
+
+    const groundMaterial =
+        new THREE.MeshStandardMaterial({
+
+            color:
+                THREE_SUNLIGHT_GROUND_COLOR,
+
+            emissive:
+                THREE_SUNLIGHT_GROUND_EMISSIVE,
+
+            emissiveIntensity:
+                0.08,
+
+            roughness:
+                0.91,
+
+            metalness:
+                0.08,
+
+            side:
+                THREE.DoubleSide
+        });
+
+
+    threeSunlightCinematicGround =
+        new THREE.Mesh(
+            groundGeometry,
+            groundMaterial
+        );
+
+
+    threeSunlightCinematicGround.name =
+        'ThreeSunlightCinematicEmeraldGround';
+
+
+    threeSunlightCinematicGround.rotation.x =
+        -Math.PI / 2;
+
+
+    threeSunlightCinematicGround.position.y =
+        0;
+
+
+    threeSunlightCinematicGround.renderOrder =
+        -10;
+
+
+    scene.add(
+        threeSunlightCinematicGround
+    );
+
+
+    console.log(
+        'Three Sunlight: CINEMATIC EMERALD GROUND ACTIVE'
+    );
+}
+
+
+/* ============================================================
+ * COMBINED ACTIVATION
+ * ============================================================ */
+
+function threeSunlightCreateCinematicGroundAndMaterials() {
+
+    threeSunlightApplyCinematicBuildingMaterial();
+
+    threeSunlightCreateCinematicGround();
+
+
+    console.log(
+        'Three Sunlight: CINEMATIC EMERALD / DEEP BLUE WORLD ACTIVE'
+    );
+}
+
+
+/* THREE SUNLIGHT - CINEMATIC EMERALD THEME END */
+
+/* THREE SUNLIGHT - FIXED LOGICAL GROUND START */
+
+/*
+ * The compiled buildings are constructed with their
+ * bottom exactly at world Y = 0.
+ *
+ * We therefore use a fixed logical ground instead of
+ * relying on an InstancedMesh bounding box.
+ *
+ * NO FLOOR GEOMETRY IS CREATED.
+ */
+
+const THREE_SUNLIGHT_GROUND_Y = 1.8;
+
+
+/*
+ * Keep the camera above the logical ground.
+ *
+ * This runs after FirstPersonControls.update()
+ * and after building collision.
+ *
+ * X and Z are completely untouched.
+ */
+function threeSunlightProtectGround() {
+
+    if (
+        !camera
+    ) {
+        return;
+    }
+
+
+    if (
+        camera.position.y <
+        THREE_SUNLIGHT_GROUND_Y
+    ) {
+
+        camera.position.y =
+            THREE_SUNLIGHT_GROUND_Y;
+    }
+}
+
+
+/* THREE SUNLIGHT - FIXED LOGICAL GROUND END */
+
+/* THREE SUNLIGHT - INVISIBLE STRUCTURE BOUNDARIES START */
+
+const THREE_SUNLIGHT_SCENE_BOUNDARY_MARGIN = 25;
+
+let threeSunlightSceneBoundary = null;
+
+
+/*
+ * Detect the horizontal outer perimeter of the
+ * compiled building structure.
+ *
+ * Only X and Z are used.
+ */
+function threeSunlightCreateSceneBoundary() {
+
+    if (
+        typeof instancedBuildings === 'undefined' ||
+        !instancedBuildings
+    ) {
+        console.warn(
+            'Three Sunlight: compiled buildings unavailable for boundary.'
+        );
+
+        return;
+    }
+
+
+    instancedBuildings.updateMatrixWorld(
+        true
+    );
+
+
+    instancedBuildings.computeBoundingBox();
+
+
+    if (
+        !instancedBuildings.boundingBox
+    ) {
+        console.warn(
+            'Three Sunlight: compiled building bounding box unavailable.'
+        );
+
+        return;
+    }
+
+
+    const structureBounds =
+        instancedBuildings.boundingBox.clone();
+
+
+    structureBounds.applyMatrix4(
+        instancedBuildings.matrixWorld
+    );
+
+
+    threeSunlightSceneBoundary = {
+
+        minX:
+            structureBounds.min.x -
+            THREE_SUNLIGHT_SCENE_BOUNDARY_MARGIN,
+
+        maxX:
+            structureBounds.max.x +
+            THREE_SUNLIGHT_SCENE_BOUNDARY_MARGIN,
+
+        minZ:
+            structureBounds.min.z -
+            THREE_SUNLIGHT_SCENE_BOUNDARY_MARGIN,
+
+        maxZ:
+            structureBounds.max.z +
+            THREE_SUNLIGHT_SCENE_BOUNDARY_MARGIN
+    };
+
+
+    console.log(
+        'Three Sunlight: INVISIBLE X / Z STRUCTURE BOUNDARY ACTIVE'
+    );
+
+
+    console.log(
+        'Three Sunlight X/Z boundary:',
+        threeSunlightSceneBoundary
+    );
+}
+
+
+/*
+ * Horizontal containment only.
+ *
+ * IMPORTANT:
+ * The executable statements below modify ONLY:
+ *
+ *   camera.position.x
+ *   camera.position.z
+ *
+ * Vertical camera position is completely untouched.
+ */
+function threeSunlightClampCameraToSceneBoundary() {
+
+    if (
+        !threeSunlightSceneBoundary ||
+        !camera
+    ) {
+        return;
+    }
+
+
+    const bounds =
+        threeSunlightSceneBoundary;
+
+
+    camera.position.x =
+        THREE.MathUtils.clamp(
+            camera.position.x,
+            bounds.minX,
+            bounds.maxX
+        );
+
+
+    camera.position.z =
+        THREE.MathUtils.clamp(
+            camera.position.z,
+            bounds.minZ,
+            bounds.maxZ
+        );
+}
+
+
+/* THREE SUNLIGHT - INVISIBLE STRUCTURE BOUNDARIES END */
+
+
+
+const params = {
+
+    far: 1000,
+
+    resolution: 2048,
+
+    azimuth: 135,
+
+    elevation: 20,
+
+};
+
+const sunDay =
+    new THREE.Color(0xfff2e3);
+
+const sunDusk =
+    new THREE.Color(0xff8a3d);
+
+// ============================================================
+// SUN
+// ============================================================
+
+function updateSun() {
+
+    sunLight.position
+        .setFromSphericalCoords(
+
+            1,
+
+            THREE.MathUtils.degToRad(
+                90 -
+                params.elevation
+            ),
+
+            THREE.MathUtils.degToRad(
+                params.azimuth
+            )
+
+        );
+
+    const daylight =
+        Math.min(
+            1,
+            params.elevation / 30
+        );
+
+    sunLight.color.lerpColors(
+        sunDusk,
+        sunDay,
+        daylight
+    );
+
+    sunLight.intensity =
+        3 +
+        daylight * 2;
+}
+
+// ============================================================
+// EXACT FACADE TEXT
+// ============================================================
+
+// ============================================================
+// INIT
+// ============================================================
+
+async function init() {
+
+    
+scene =
+        new THREE.Scene();
+
+/* THREE SUNLIGHT - BLUE SUNLIT FOREST UNIVERSE THEME START */
+
+(function() {
+
+    /*
+     * ========================================================
+     * BLUE DAYTIME SKY
+     * ========================================================
+     */
+
+    const threeSunlightSkyCanvas =
+        document.createElement('canvas');
+
+    threeSunlightSkyCanvas.width =
+        2048;
+
+    threeSunlightSkyCanvas.height =
+        1024;
+
+    const threeSunlightSkyContext =
+        threeSunlightSkyCanvas.getContext('2d');
+
+    /*
+     * Deep blue -> bright blue -> green forest horizon.
+     */
+
+    const skyGradient =
+        threeSunlightSkyContext.createLinearGradient(
+            0,
+            0,
+            0,
+            1024
+        );
+
+    skyGradient.addColorStop(
+        0.00,
+        '#04132f'
+    );
+
+    skyGradient.addColorStop(
+        0.18,
+        '#0b2e62'
+    );
+
+    skyGradient.addColorStop(
+        0.38,
+        '#155f98'
+    );
+
+    skyGradient.addColorStop(
+        0.58,
+        '#3d91b8'
+    );
+
+    skyGradient.addColorStop(
+        0.73,
+        '#82bdc8'
+    );
+
+    skyGradient.addColorStop(
+        0.84,
+        '#557f67'
+    );
+
+    skyGradient.addColorStop(
+        1.00,
+        '#0a2e20'
+    );
+
+    threeSunlightSkyContext.fillStyle =
+        skyGradient;
+
+    threeSunlightSkyContext.fillRect(
+        0,
+        0,
+        2048,
+        1024
+    );
+
+    /*
+     * ========================================================
+     * LARGE SOFT SUN GLOW
+     * ========================================================
+     */
+
+    const sunX =
+        2048 * 0.72;
+
+    const sunY =
+        1024 * 0.25;
+
+    const sunGlow =
+        threeSunlightSkyContext.createRadialGradient(
+            sunX,
+            sunY,
+            5,
+            sunX,
+            sunY,
+            370
+        );
+
+    sunGlow.addColorStop(
+        0.00,
+        'rgba(255,255,245,1.0)'
+    );
+
+    sunGlow.addColorStop(
+        0.08,
+        'rgba(255,251,220,0.90)'
+    );
+
+    sunGlow.addColorStop(
+        0.20,
+        'rgba(255,239,175,0.48)'
+    );
+
+    sunGlow.addColorStop(
+        0.42,
+        'rgba(255,220,135,0.16)'
+    );
+
+    sunGlow.addColorStop(
+        0.70,
+        'rgba(255,210,120,0.04)'
+    );
+
+    sunGlow.addColorStop(
+        1.00,
+        'rgba(255,210,120,0)'
+    );
+
+    threeSunlightSkyContext.fillStyle =
+        sunGlow;
+
+    threeSunlightSkyContext.fillRect(
+        sunX - 400,
+        sunY - 400,
+        800,
+        800
+    );
+
+    /*
+     * ========================================================
+     * SUN DISC
+     * ========================================================
+     */
+
+    const sunDisc =
+        threeSunlightSkyContext.createRadialGradient(
+            sunX,
+            sunY,
+            0,
+            sunX,
+            sunY,
+            65
+        );
+
+    sunDisc.addColorStop(
+        0,
+        'rgba(255,255,255,1)'
+    );
+
+    sunDisc.addColorStop(
+        0.35,
+        'rgba(255,252,225,1)'
+    );
+
+    sunDisc.addColorStop(
+        0.70,
+        'rgba(255,235,170,0.85)'
+    );
+
+    sunDisc.addColorStop(
+        1,
+        'rgba(255,220,135,0)'
+    );
+
+    threeSunlightSkyContext.fillStyle =
+        sunDisc;
+
+    threeSunlightSkyContext.beginPath();
+
+    threeSunlightSkyContext.arc(
+        sunX,
+        sunY,
+        65,
+        0,
+        Math.PI * 2
+    );
+
+    threeSunlightSkyContext.fill();
+
+    /*
+     * ========================================================
+     * ATMOSPHERIC LIGHT HAZE
+     * ========================================================
+     */
+
+    const atmosphere =
+        threeSunlightSkyContext.createLinearGradient(
+            0,
+            430,
+            0,
+            800
+        );
+
+    atmosphere.addColorStop(
+        0,
+        'rgba(220,245,255,0)'
+    );
+
+    atmosphere.addColorStop(
+        0.35,
+        'rgba(205,238,245,0.18)'
+    );
+
+    atmosphere.addColorStop(
+        0.65,
+        'rgba(140,210,195,0.15)'
+    );
+
+    atmosphere.addColorStop(
+        1,
+        'rgba(50,120,80,0)'
+    );
+
+    threeSunlightSkyContext.fillStyle =
+        atmosphere;
+
+    threeSunlightSkyContext.fillRect(
+        0,
+        380,
+        2048,
+        440
+    );
+
+    /*
+     * ========================================================
+     * FOREST HORIZON
+     * ========================================================
+     */
+
+    function drawForestLayer(
+        baseY,
+        height,
+        color,
+        spacing,
+        seed
+    ) {
+
+        threeSunlightSkyContext.fillStyle =
+            color;
+
+        threeSunlightSkyContext.beginPath();
+
+        threeSunlightSkyContext.moveTo(
+            0,
+            1024
+        );
+
+        threeSunlightSkyContext.lineTo(
+            0,
+            baseY
+        );
+
+        let x = -40;
+        let randomSeed = seed;
+
+        while (
+            x <
+            2090
+        ) {
+
+            randomSeed =
+                (
+                    randomSeed * 9301 +
+                    49297
+                ) % 233280;
+
+            const random =
+                randomSeed / 233280;
+
+            const treeHeight =
+                height *
+                (
+                    0.55 +
+                    random * 0.75
+                );
+
+            const treeWidth =
+                spacing *
+                (
+                    0.72 +
+                    random * 0.55
+                );
+
+            threeSunlightSkyContext.moveTo(
+                x,
+                baseY
+            );
+
+            threeSunlightSkyContext.lineTo(
+                x + treeWidth * 0.5,
+                baseY - treeHeight
+            );
+
+            threeSunlightSkyContext.lineTo(
+                x + treeWidth,
+                baseY
+            );
+
+            x +=
+                treeWidth * 0.72;
+        }
+
+        threeSunlightSkyContext.lineTo(
+            2048,
+            1024
+        );
+
+        threeSunlightSkyContext.closePath();
+
+        threeSunlightSkyContext.fill();
+    }
+
+    /*
+     * Distant forest.
+     */
+
+    drawForestLayer(
+        760,
+        130,
+        'rgba(45,91,70,0.45)',
+        45,
+        19
+    );
+
+    /*
+     * Middle forest.
+     */
+
+    drawForestLayer(
+        825,
+        190,
+        'rgba(19,64,44,0.70)',
+        52,
+        73
+    );
+
+    /*
+     * Dark foreground forest.
+     */
+
+    drawForestLayer(
+        915,
+        275,
+        'rgba(4,30,20,0.97)',
+        60,
+        137
+    );
+
+    /*
+     * ========================================================
+     * CREATE SKY TEXTURE
+     * ========================================================
+     */
+
+    const threeSunlightSkyTexture =
+        new THREE.CanvasTexture(
+            threeSunlightSkyCanvas
+        );
+
+    threeSunlightSkyTexture.colorSpace =
+        THREE.SRGBColorSpace;
+
+    threeSunlightSkyTexture.needsUpdate =
+        true;
+
+    /*
+     * IMPORTANT:
+     * This is the final sky background.
+     */
+
+    scene.background =
+        threeSunlightSkyTexture;
+
+    /*
+     * ========================================================
+     * FOREST ATMOSPHERE
+     * ========================================================
+     */
+
+    scene.fog =
+        new THREE.Fog(
+            0x123b2c,
+            700,
+            3200
+        );
+
+    /*
+     * ========================================================
+     * BLUE SKY LIGHT
+     * ========================================================
+     */
+
+    const threeSunlightSkyLight =
+        new THREE.HemisphereLight(
+            0x8fcaff,
+            0x123d28,
+            1.65
+        );
+
+    threeSunlightSkyLight.name =
+        'ThreeSunlight_BlueForest_SkyLight';
+
+    scene.add(
+        threeSunlightSkyLight
+    );
+
+    /*
+     * ========================================================
+     * WARM GOLDEN SUNLIGHT
+     * ========================================================
+     */
+
+    const threeSunlightSun =
+        new THREE.DirectionalLight(
+            0xffefc2,
+            3.1
+        );
+
+    threeSunlightSun.name =
+        'ThreeSunlight_WarmSun';
+
+    threeSunlightSun.position.set(
+        700,
+        1100,
+        -500
+    );
+
+    threeSunlightSun.castShadow =
+        false;
+
+    scene.add(
+        threeSunlightSun
+    );
+
+    /*
+     * ========================================================
+     * FOREST GREEN FILL
+     * ========================================================
+     */
+
+    const threeSunlightForestFill =
+        new THREE.DirectionalLight(
+            0x367957,
+            0.52
+        );
+
+    threeSunlightForestFill.name =
+        'ThreeSunlight_ForestFill';
+
+    threeSunlightForestFill.position.set(
+        -500,
+        350,
+        800
+    );
+
+    threeSunlightForestFill.castShadow =
+        false;
+
+    scene.add(
+        threeSunlightForestFill
+    );
+
+    /*
+     * ========================================================
+     * SOFT AMBIENT FILL
+     * ========================================================
+     */
+
+    const threeSunlightAmbient =
+        new THREE.AmbientLight(
+            0x285f49,
+            0.40
+        );
+
+    threeSunlightAmbient.name =
+        'ThreeSunlight_ForestAmbient';
+
+    scene.add(
+        threeSunlightAmbient
+    );
+
+    scene.userData =
+        scene.userData || {};
+
+    scene.userData.threeSunlightTheme =
+        'BLUE_SUNLIT_DARK_FOREST_UNIVERSE';
+
+    console.log(
+        'Three Sunlight: BLUE SUNLIT DARK FOREST SKY ACTIVE'
+    );
+
+})();
+
+/* THREE SUNLIGHT - BLUE SUNLIT FOREST UNIVERSE THEME END */
+
+
+
+    /* BLUE SUNLIT FOREST SKY IS INSTALLED AFTER RENDERER INITIALIZATION */
+
+    camera =
+        new THREE.PerspectiveCamera(
+
+            60,
+
+            window.innerWidth /
+            window.innerHeight,
+
+            0.1,
+
+            10000
+
+        );
+
+    camera.position.set(
+        60,
+        8,
+        0
+    );
+
+    camera.lookAt(
+        -60,
+        8,
+        0
+    );
+
+    scene.add(
+        camera
+    );
+
+    renderer =
+        new THREE.WebGPURenderer({
+
+            antialias: true
+
+        });
+
+    renderer.library.addLight(
+        SunLightNode,
+        SunLight
+    );
+
+    renderer.setPixelRatio(
+        Math.min(
+            window.devicePixelRatio,
+            2
+        )
+    );
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
+    renderer.shadowMap.enabled =
+        true;
+
+    renderer.toneMapping =
+        THREE.ACESFilmicToneMapping;
+
+    renderer.toneMappingExposure =
+        0.7;
+
+    renderer.inspector =
+        new Inspector();
+
+    document
+        .getElementById(
+            'container'
+        )
+        .appendChild(
+            renderer.domElement
+        );
+
+    controls =
+        new FirstPersonControls(
+            camera,
+            renderer.domElement
+        );
+
+    controls.movementSpeed =
+        40;
+
+    controls.lookSpeed =
+        0.2;
+
+    timer =
+        new THREE.Timer();
+
+    // ========================================================
+    // SUNLIGHT
+    // ========================================================
+
+    sunLight =
+        new SunLight();
+
+    sunLight.castShadow =
+        true;
+
+    sunLight.shadow.camera.far =
+        params.far;
+
+    sunLight.shadow.mapSize.setScalar(
+        params.resolution
+    );
+
+    sunLight.shadow.normalBias =
+        0.05;
+
+    scene.add(
+        sunLight
+    );
+
+    await renderer.init();
+
+    // GROUND
+    // ========================================================
+
+    const ground =
+        new THREE.Mesh(
+
+            new THREE.PlaneGeometry(
+                10000,
+                10000
+            ),
+
+            new THREE.MeshStandardMaterial({
+
+                color: 0x4b4650,
+
+                roughness: 0.9,
+
+                metalness: 0.05
+
+            })
+
+        );
+
+    ground.rotation.x =
+        -Math.PI / 2;
+
+    ground.receiveShadow =
+        true;
+
+    scene.add(
+        ground
+    );
+
+    // ========================================================
+    // AVENUE POSTS
+    // ========================================================
+
+    const dummy =
+        new THREE.Object3D();
+
+    const posts =
+        new THREE.InstancedMesh(
+
+            new THREE.BoxGeometry(
+                1,
+                10,
+                1
+            ),
+
+            new THREE.MeshStandardMaterial({
+
+                color: 0x475161
+
+            }),
+
+            120
+
+        );
+
+    posts.castShadow =
+        true;
+
+    posts.receiveShadow =
+        true;
+
+    scene.add(
+        posts
+    );
+
+    for (
+        let i = 0;
+        i < 60;
+        i++
+    ) {
+
+        for (
+            const side of [-1, 1]
+        ) {
+
+            dummy.position.set(
+
+                30 -
+                i * 17,
+
+                5,
+
+                side * 13
+
+            );
+
+            dummy.scale.set(
+                1,
+                1,
+                1
+            );
+
+            dummy.updateMatrix();
+
+            posts.setMatrixAt(
+
+                i * 2 +
+                (side + 1) / 2,
+
+                dummy.matrix
+
+            );
+        }
+    }
+
+    // ========================================================
+    // CITY TOWERS
+    //
+    // THIS IS THE IMPORTANT PART.
+    //
+    // Each tower's EXACT position, height and color
+    // are stored in towerRecords while the tower itself
+    // is created.
+    //
+    // Facade text later uses these exact values.
+    // ========================================================
+    // ========================================================
+    // CITY TOWERS
+    //
+    // IMPORTANT:
+    //
+    // Each tower is generated ONCE.
+    //
+    // The exact:
+    //     X
+    //     Z
+    //     height
+    //     side
+    //     color
+    //
+    // values are stored in towerRecords.
+    //
+    // Facade text later uses these exact records.
+    // It NEVER generates a second random position.
+    // ========================================================
+    // ========================================================
+    // CITY TOWERS
+    //
+    // IMPORTANT:
+    //
+    // Each tower is generated ONCE.
+    //
+    // The exact:
+    //     X
+    //     Z
+    //     height
+    //     side
+    //     color
+    //
+    // values are stored in towerRecords.
+    //
+    // Facade text later uses these exact records.
+    // It NEVER generates a second random position.
+    // ========================================================
+
+const towerRecords = [];
+
+const towers = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(10, 1, 10),
+    new THREE.MeshStandardNodeMaterial({
+        roughness: 0.38,
+        metalness: 0.28
+    }),
+    60
+);
+
+const towerColors = [
+    new THREE.Color(0x00d9ff),
+    new THREE.Color(0xff1744)
+];
+
+let towerIndex = 0;
+
+for (let side = -1; side <= 1; side += 2) {
+
+    for (let i = 0; i < 30; i++) {
+
+        const height =
+            20 +
+            Math.random() * 40;
+
+        const towerX =
+            -40 -
+            i * 32 -
+            Math.random() * 10;
+
+        const towerZ =
+            side *
+            (38 + Math.random() * 55);
+
+        const matrix =
+            new THREE.Matrix4();
+
+        matrix.compose(
+            new THREE.Vector3(
+                towerX,
+                height * 0.5,
+                towerZ
+            ),
+            new THREE.Quaternion(),
+            new THREE.Vector3(
+                1,
+                height,
+                1
+            )
+        );
+
+        towers.setMatrixAt(
+            towerIndex,
+            matrix
+        );
+
+        const colorIndex =
+            (i + (side + 1) / 2) % 2;
+
+        towers.setColorAt(
+            towerIndex,
+            towerColors[colorIndex]
+        );
+
+        towerRecords.push({
+            index: towerIndex,
+            row: i,
+            side: side,
+            x: towerX,
+            z: towerZ,
+            height: height,
+            colorIndex: colorIndex,
+            colorName:
+                colorIndex === 0
+                    ? 'BLUE'
+                    : 'RED'
+        });
+
+        towerIndex++;
+    }
+}
+
+towers.instanceMatrix.needsUpdate = true;
+
+if (towers.instanceColor) {
+    towers.instanceColor.needsUpdate = true;
+}
+
+scene.add(towers);
+
+    // ========================================================
+    // SUN INSPECTOR
+    // ========================================================
+
+    const sunGui =
+        renderer.inspector
+            .createParameters(
+                'Sun Light'
+            );
+
+    sunGui
+        .add(
+            params,
+            'far',
+            100,
+            3000
+        )
+        .step(1)
+        .name(
+            'shadow far'
+        )
+        .onChange(
+            function(value) {
+
+                sunLight
+                    .shadow
+                    .camera
+                    .far =
+                    value;
+
+            }
+        );
+
+    sunGui
+        .add(
+            params,
+            'resolution',
+            [
+                256,
+                512,
+                1024,
+                2048,
+                4096
+            ]
+        )
+        .name(
+            'shadow resolution'
+        )
+        .onChange(
+            function(value) {
+
+                sunLight
+                    .shadow
+                    .mapSize
+                    .setScalar(
+                        value
+                    );
+
+            }
+        );
+
+    sunGui
+        .add(
+            params,
+            'azimuth',
+            0,
+            360
+        )
+        .name(
+            'azimuth'
+        )
+        .onChange(
+            updateSun
+        );
+
+    sunGui
+        .add(
+            params,
+            'elevation',
+            5,
+            80
+        )
+        .name(
+            'elevation'
+        )
+        .onChange(
+            updateSun
+        );
+
+    updateSun();
+
+    // ========================================================
+    // RESIZE
+    // ========================================================
+
+    window.addEventListener(
+        'resize',
+        function() {
+
+            camera.aspect =
+                window.innerWidth /
+                window.innerHeight;
+
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(
+
+                window.innerWidth,
+
+                window.innerHeight
+
+            );
+
+            controls.handleResize();
+
+        }
+    );
+
+renderer.setAnimationLoop(
+        animate
+    );
+}
+
+// ============================================================
+// COMPILED CITY SOLID COLLISION
+// ============================================================
+//
+// Buildings are treated as rectangular solid volumes.
+// No physics engine is required.
+//
+// The collision system only checks nearby grid cells,
+// which keeps 4,809 buildings inexpensive to handle.
+// ============================================================
+
+const COMPILED_CITY_COLLISION_ENABLED =
+    true;
+
+const COMPILED_CITY_COLLISION_RADIUS =
+    1.35;
+
+const COMPILED_CITY_COLLISION_VERTICAL_MARGIN =
+    0.25;
+
+function compiledCityResolveBuildingCollision(
+    previousX,
+    previousY,
+    previousZ
+) {
+    if (
+        !COMPILED_CITY_COLLISION_ENABLED ||
+        !compiledCityBuildings ||
+        compiledCityBuildings.length === 0
+    ) {
+        return;
+    }
+
+    /*
+     * Only perform building collision when the camera
+     * is vertically inside the building volume.
+     *
+     * The buildings begin at y = 0.
+     */
+    const cameraBottom =
+        camera.position.y -
+        COMPILED_CITY_COLLISION_VERTICAL_MARGIN;
+
+    const cameraTop =
+        camera.position.y +
+        COMPILED_CITY_COLLISION_VERTICAL_MARGIN;
+
+    /*
+     * If the camera is below the city or above all
+     * building roofs, there is no wall collision.
+     */
+    if (
+        cameraTop < 0
+    ) {
+        return;
+    }
+
+    /*
+     * Convert the camera position to approximate grid
+     * coordinates.
+     *
+     * The city uses:
+     *
+     *   columns = COMPILED_CITY_GRID_COLUMNS
+     *   spacing = COMPILED_CITY_GRID_SPACING
+     */
+    const spacing =
+        COMPILED_CITY_GRID_SPACING;
+
+    const columns =
+        COMPILED_CITY_GRID_COLUMNS;
+
+    const approximateColumn =
+        Math.round(
+            (
+                camera.position.x /
+                spacing
+            ) +
+            (
+                columns - 1
+            ) / 2
+        );
+
+    const approximateRow =
+        Math.round(
+            (
+                camera.position.z /
+                spacing
+            ) +
+            Math.floor(
+                compiledCityBuildings.length /
+                columns
+            ) / 2
+        );
+
+    /*
+     * Camera movement at speed 40 is still only a small
+     * distance per frame, so checking a small neighborhood
+     * around the current cell is sufficient.
+     */
+    const gridSearchRadius =
+        2;
+
+    const minColumn =
+        Math.max(
+            0,
+            approximateColumn -
+            gridSearchRadius
+        );
+
+    const maxColumn =
+        Math.min(
+            columns - 1,
+            approximateColumn +
+            gridSearchRadius
+        );
+
+    const minRow =
+        Math.max(
+            0,
+            approximateRow -
+            gridSearchRadius
+        );
+
+    const maxRow =
+        Math.min(
+            Math.ceil(
+                compiledCityBuildings.length /
+                columns
+            ) - 1,
+            approximateRow +
+            gridSearchRadius
+        );
+
+    /*
+     * Resolve each nearby building.
+     *
+     * We use the camera's previous position to determine
+     * which side of the building the player approached from.
+     * This allows natural sliding along walls.
+     */
+    for (
+        let row = minRow;
+        row <= maxRow;
+        row++
+    ) {
+        for (
+            let column = minColumn;
+            column <= maxColumn;
+            column++
+        ) {
+            const index =
+                row *
+                columns +
+                column;
+
+            if (
+                index < 0 ||
+                index >= compiledCityBuildings.length
+            ) {
+                continue;
+            }
+
+            const building =
+                compiledCityBuildings[index];
+
+            if (
+                !building
+            ) {
+                continue;
+            }
+
+            const halfWidth =
+                (
+                    building.width /
+                    2
+                ) +
+                COMPILED_CITY_COLLISION_RADIUS;
+
+            const halfDepth =
+                (
+                    building.depth /
+                    2
+                ) +
+                COMPILED_CITY_COLLISION_RADIUS;
+
+            const minX =
+                building.x -
+                halfWidth;
+
+            const maxX =
+                building.x +
+                halfWidth;
+
+            const minZ =
+                building.z -
+                halfDepth;
+
+            const maxZ =
+                building.z +
+                halfDepth;
+
+            const currentX =
+                camera.position.x;
+
+            const currentZ =
+                camera.position.z;
+
+            /*
+             * Is the camera currently inside the
+             * expanded building rectangle?
+             */
+            if (
+                currentX <= minX ||
+                currentX >= maxX ||
+                currentZ <= minZ ||
+                currentZ >= maxZ
+            ) {
+                continue;
+            }
+
+            /*
+             * Find the penetration distance to each wall.
+             */
+            const pushLeft =
+                currentX -
+                minX;
+
+            const pushRight =
+                maxX -
+                currentX;
+
+            const pushFront =
+                currentZ -
+                minZ;
+
+            const pushBack =
+                maxZ -
+                currentZ;
+
+            /*
+             * Determine the nearest wall.
+             */
+            const smallestPush =
+                Math.min(
+                    pushLeft,
+                    pushRight,
+                    pushFront,
+                    pushBack
+                );
+
+            /*
+             * Prefer the direction that represents the
+             * actual incoming movement when possible.
+             */
+            const movementX =
+                camera.position.x -
+                previousX;
+
+            const movementZ =
+                camera.position.z -
+                previousZ;
+
+            if (
+                smallestPush === pushLeft
+            ) {
+                camera.position.x =
+                    minX;
+
+            }
+            else if (
+                smallestPush === pushRight
+            ) {
+                camera.position.x =
+                    maxX;
+
+            }
+            else if (
+                smallestPush === pushFront
+            ) {
+                camera.position.z =
+                    minZ;
+
+            }
+            else {
+                camera.position.z =
+                    maxZ;
+            }
+        }
+    }
+
+    /*
+     * Final safety pass.
+     *
+     * If collision resolution somehow moved the camera
+     * farther than expected, don't allow a large teleport.
+     */
+    const correctionX =
+        camera.position.x -
+        previousX;
+
+    const correctionZ =
+        camera.position.z -
+        previousZ;
+
+    const correctionDistanceSquared =
+        (
+            correctionX *
+            correctionX
+        ) +
+        (
+            correctionZ *
+            correctionZ
+        );
+
+    const maxCorrection =
+        (
+            controls.movementSpeed *
+            0.25
+        );
+
+    if (
+        correctionDistanceSquared >
+        maxCorrection *
+        maxCorrection
+    ) {
+        camera.position.x =
+            previousX;
+
+        camera.position.z =
+            previousZ;
+    }
+}
+
+// ============================================================
+// ANIMATION
+// ============================================================
+
+function animate() {
+
+    compiledCityUpdateFacades();
+
+    compiledCityUpdateFacadeSides();
+    if (
+        typeof animatedFacades !== 'undefined' &&
+        animatedFacades
+    ) {
+
+        const facadeElapsed =
+            typeof clock !== 'undefined'
+                ? clock.getElapsedTime()
+                : performance.now() * 0.001;
+
+        animatedFacades.update(
+            facadeElapsed
+        );
+    }
+
+    if (
+        typeof animatedFacades !== 'undefined' &&
+        animatedFacades
+    ) {
+
+        const facadeElapsed =
+            typeof clock !== 'undefined'
+                ? clock.getElapsedTime()
+                : performance.now() * 0.001;
+
+        animatedFacades.update(
+            facadeElapsed
+        );
+    }
+
+    timer.update();
+
+    /*
+     * Save the camera position before FirstPersonControls
+     * moves it. Collision uses this position to resolve
+     * the attempted movement against building walls.
+     */
+    const previousCameraX =
+        camera.position.x;
+
+    const previousCameraY =
+        camera.position.y;
+
+    const previousCameraZ =
+        camera.position.z;
+
+    controls.update(
+        timer.getDelta()
+    );
+
+    /*
+     * Buildings are solid.
+     *
+     * The camera may move freely in open space, but
+     * cannot enter a building's rectangular volume.
+     */
+    compiledCityResolveBuildingCollision(
+        previousCameraX,
+        previousCameraY,
+        previousCameraZ
+    );
+
+    threeSunlightProtectGround();
+
+threeSunlightClampCameraToSceneBoundary();
+
+renderer.render(
+        scene,
+        camera
+    );
+
+}
+
+init();
+
+// === COMPILED_DISPLAY_TEST_START ===
+
+/*
+ * ============================================================
+ * COMPILED TEXT CITY - HIGH CONTRAST DISPLAY TEST
+ * ============================================================
+ *
+ * Every active building gets:
+ *
+ *     unique canvas
+ *          +
+ *     unique CanvasTexture
+ *          +
+ *     unique material
+ *          +
+ *     unique facade
+ *
+ * No active building shares another building's texture.
+ */
+
+const compiledCityConfig = {
+
+    dataUrl: '/data/compiled-city.json',
+
+    buildingCount: 0,
+
+    gridColumns: 76,
+
+    spacing: 22,
+
+    minHeight: 14,
+
+    maxHeight: 55,
+
+    buildingSizeMin: 8,
+
+    buildingSizeMax: 13,
+
+    activeRadius: 220,
+
+    releaseRadius: 280,
+
+    maxActiveFacades: 48,
+
+    canvasWidth: 1024,
+
+    canvasHeight: 300
+};
+
+// ============================================================
+// ===== BEGIN COMPILED CITY DISPLAY SYSTEM =====
+// ============================================================
+//
+// DIRECT BUILDING FACADE VERSION
+//
+// Every active display is attached to:
+//
+//     compiledCityBuildingAnchor
+//              |
+//              +---- facade Mesh
+//                       |
+//                       +---- unique CanvasTexture
+//
+// ============================================================
+const COMPILED_CITY_DATA_URL = '/data/compiled-city.json';
+
+const COMPILED_CITY_ACTIVE_RADIUS = 220;
+const COMPILED_CITY_RELEASE_RADIUS = 280;
+const COMPILED_CITY_MAX_ACTIVE_FACADES = 48;
+const COMPILED_CITY_GRID_SPACING = 22;
+
+const COMPILED_CITY_GRID_COLUMNS = 76;
+const COMPILED_CITY_SPACING = 22;
+
+const COMPILED_CITY_BUILDING_COLORS = [
+    0x00d9ff,
+    0xff1744,
+    0x00ff9d,
+    0xff00d9,
+    0x7c4dff,
+    0xffea00,
+    0x00e5ff,
+    0xff6d00
+];
+
+let compiledCitySections = [];
+
+let compiledCityBuildings = [];
+
+let compiledCityBuildingGroup = null;
+
+let compiledCityFacadeGroup = null;
+
+let compiledCityActiveFacades = new Map();
+
+let compiledCitySharedBuildingGeometry = null;
+
+let compiledCityDataReady = false;
+
+let compiledCityLastUpdate = 0;
+/* ============================================================
+   FIXED FOUR-SIDED NEWSREEL SETTINGS
+
+   These values control ONLY the text display surface.
+
+   They do NOT change building dimensions.
+   ============================================================ */
+
+
+const COMPILED_CITY_NEWSREEL_SPEED =
+    30;
+
+const COMPILED_CITY_NEWSREEL_LINE_HEIGHT =
+    24;
+
+const COMPILED_CITY_NEWSREEL_SIDE_OFFSETS =
+    [
+        0,
+        0.25,
+        0.50,
+        0.75
+    ];
+
+let compiledCityNewsreelStarted =
+    false;
+
+let compiledCityNewsreelLastTime = 0;
+
+const COMPILED_CITY_NEWSREEL_CANVAS_WIDTH = 1024;
+
+const COMPILED_CITY_NEWSREEL_CANVAS_HEIGHT = 512;
+
+let compiledCityLastSideUpdate = 0;
+
+// ============================================================
+// CREATE UNIQUE CANVAS TEXTURE
+// ============================================================
+
+
+
+
+
+/* THREE SUNLIGHT - COMPILED CITY COMPACT BUILDING SETTINGS */
+
+const COMPILED_CITY_BUILDING_WIDTH_SCALE = 0.60;
+const COMPILED_CITY_BUILDING_DEPTH_SCALE = 0.60;
+const COMPILED_CITY_BUILDING_HEIGHT_SCALE = 0.55;
+
+const COMPILED_CITY_TEXT_VISIBLE_LINES = 10;
+const COMPILED_CITY_TEXT_LINE_HEIGHT = 38;
+
+const COMPILED_CITY_TEXT_BORDER_TOP = 130;
+const COMPILED_CITY_TEXT_BORDER_BOTTOM = 130;
+const COMPILED_CITY_TEXT_BORDER_LEFT = 130;
+const COMPILED_CITY_TEXT_BORDER_RIGHT = 130;
+
+const COMPILED_CITY_TEXT_AREA_WIDTH = 880;
+
+const COMPILED_CITY_TEXT_AREA_HEIGHT =
+    COMPILED_CITY_TEXT_VISIBLE_LINES *
+    COMPILED_CITY_TEXT_LINE_HEIGHT;
+
+const COMPILED_CITY_FIXED_FACE_WIDTH =
+    COMPILED_CITY_TEXT_AREA_WIDTH +
+    COMPILED_CITY_TEXT_BORDER_LEFT +
+    COMPILED_CITY_TEXT_BORDER_RIGHT;
+
+const COMPILED_CITY_FIXED_FACE_HEIGHT =
+    COMPILED_CITY_TEXT_AREA_HEIGHT +
+    COMPILED_CITY_TEXT_BORDER_TOP +
+    COMPILED_CITY_TEXT_BORDER_BOTTOM;
+
+/* END THREE SUNLIGHT - COMPILED CITY COMPACT BUILDING SETTINGS */
+
+function compiledCityCreateUniqueDisplay(
+    sectionIndex,
+    sectionText,
+    sideIndex = 0
+) {
+
+    const canvas =
+        document.createElement(
+            'canvas'
+        );
+
+    canvas.width =
+        COMPILED_CITY_FIXED_FACE_WIDTH;
+
+    canvas.height =
+        COMPILED_CITY_FIXED_FACE_HEIGHT;
+
+    const context =
+        canvas.getContext(
+            '2d'
+        );
+
+    /*
+     * Background.
+     */
+
+    context.fillStyle =
+        '#080b10';
+
+    context.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    /*
+     * Thick structural border.
+     */
+
+    context.fillStyle =
+        '#171d25';
+
+    context.fillRect(
+        0,
+        0,
+        canvas.width,
+        COMPILED_CITY_TEXT_BORDER_TOP
+    );
+
+    context.fillRect(
+        0,
+        canvas.height -
+        COMPILED_CITY_TEXT_BORDER_BOTTOM,
+        canvas.width,
+        COMPILED_CITY_TEXT_BORDER_BOTTOM
+    );
+
+    context.fillRect(
+        0,
+        0,
+        COMPILED_CITY_TEXT_BORDER_LEFT,
+        canvas.height
+    );
+
+    context.fillRect(
+        canvas.width -
+        COMPILED_CITY_TEXT_BORDER_RIGHT,
+        0,
+        COMPILED_CITY_TEXT_BORDER_RIGHT,
+        canvas.height
+    );
+
+    /*
+     * Inner text window.
+     */
+
+    const textX =
+        COMPILED_CITY_TEXT_BORDER_LEFT;
+
+    const textY =
+        COMPILED_CITY_TEXT_BORDER_TOP;
+
+    const textWidth =
+        COMPILED_CITY_TEXT_AREA_WIDTH;
+
+    const textHeight =
+        COMPILED_CITY_TEXT_AREA_HEIGHT;
+
+    /*
+     * Fixed text-window background.
+     */
+
+    context.fillStyle =
+        '#05070a';
+
+    context.fillRect(
+        textX,
+        textY,
+        textWidth,
+        textHeight
+    );
+
+    /*
+     * Prepare text.
+     */
+
+    const cleanText =
+        String(
+            sectionText || ''
+        )
+        .replace(
+            /\s+/g,
+            ' '
+        )
+        .trim();
+
+    context.font =
+        'bold 32px Arial';
+
+    context.textBaseline =
+        'top';
+
+    const words =
+        cleanText.split(
+            ' '
+        );
+
+    const lines = [];
+
+    let currentLine = '';
+
+    for (
+        const word of words
+    ) {
+
+        const testLine =
+            currentLine
+                ? `${currentLine} ${word}`
+                : word;
+
+        const width =
+            context.measureText(
+                testLine
+            ).width;
+
+        if (
+            width >
+            textWidth - 36
+        ) {
+
+            if (currentLine) {
+                lines.push(
+                    currentLine
+                );
+            }
+
+            currentLine =
+                word;
+
+        } else {
+
+            currentLine =
+                testLine;
+        }
+    }
+
+    if (currentLine) {
+        lines.push(
+            currentLine
+        );
+    }
+
+    /*
+     * Newsreel state.
+     */
+
+    const totalTextHeight =
+        lines.length *
+        COMPILED_CITY_TEXT_LINE_HEIGHT;
+
+    const maxScroll =
+        Math.max(
+            0,
+            totalTextHeight -
+            textHeight
+        );
+
+    let texture = null;
+
+    function drawNewsreel(timestamp) {
+
+        const seconds =
+            timestamp / 1000;
+
+        /*
+         * Continuous movement.
+         * Once the end is reached, restart cleanly.
+         */
+
+        const travel =
+            maxScroll > 0
+                ? (
+                    seconds *
+                    COMPILED_CITY_NEWSREEL_SPEED
+                  ) %
+                  (
+                    maxScroll +
+                    textHeight
+                  )
+                : 0;
+
+        context.save();
+
+        /*
+         * Clear only the text window.
+         */
+
+        context.fillStyle =
+            '#05070a';
+
+        context.fillRect(
+            textX,
+            textY,
+            textWidth,
+            textHeight
+        );
+
+        /*
+         * Clip to the fixed ten-line display area.
+         */
+
+        context.beginPath();
+
+        context.rect(
+            textX,
+            textY,
+            textWidth,
+            textHeight
+        );
+
+        context.clip();
+
+        /*
+         * Draw scrolling lines.
+         */
+
+        context.font =
+            'bold 32px Arial';
+
+        context.textBaseline =
+            'top';
+
+        context.fillStyle =
+            '#ffffff';
+
+        for (
+            let i = 0;
+            i < lines.length;
+            i++
+        ) {
+
+            const y =
+                textY +
+                i *
+                COMPILED_CITY_TEXT_LINE_HEIGHT -
+                travel;
+
+            if (
+                y >
+                    textY -
+                    COMPILED_CITY_TEXT_LINE_HEIGHT &&
+                y <
+                    textY +
+                    textHeight
+            ) {
+
+                context.fillText(
+                    lines[i],
+                    textX + 18,
+                    y
+                );
+            }
+        }
+
+        context.restore();
+
+        /*
+         * The canvas is continuously changing because
+         * the newsreel scrolls. Tell Three.js/WebGPU
+         * that the CanvasTexture needs a fresh upload.
+         */
+        if (texture) {
+            texture.needsUpdate = true;
+        }
+
+        /*
+         * Re-draw the structural border so
+         * scrolling text can NEVER cover it.
+         */
+
+        context.fillStyle =
+            '#171d25';
+
+        context.fillRect(
+            0,
+            0,
+            canvas.width,
+            COMPILED_CITY_TEXT_BORDER_TOP
+        );
+
+        context.fillRect(
+            0,
+            canvas.height -
+            COMPILED_CITY_TEXT_BORDER_BOTTOM,
+            canvas.width,
+            COMPILED_CITY_TEXT_BORDER_BOTTOM
+        );
+
+        context.fillRect(
+            0,
+            0,
+            COMPILED_CITY_TEXT_BORDER_LEFT,
+            canvas.height
+        );
+
+        context.fillRect(
+            canvas.width -
+            COMPILED_CITY_TEXT_BORDER_RIGHT,
+            0,
+            COMPILED_CITY_TEXT_BORDER_RIGHT,
+            canvas.height
+        );
+
+        /*
+         * Small section identifier inside
+         * the structural header.
+         */
+
+        context.fillStyle =
+            '#8d99a8';
+
+        context.font =
+            'bold 18px Arial';
+
+        context.textBaseline =
+            'middle';
+
+        context.fillText(
+            `SECTION ${sectionIndex + 1}`,
+            COMPILED_CITY_TEXT_BORDER_LEFT + 18,
+            COMPILED_CITY_TEXT_BORDER_TOP / 2
+        );
+
+        /*
+         * Side indicator.
+         */
+
+        const sideNames = [
+            'FRONT',
+            'BACK',
+            'LEFT',
+            'RIGHT'
+        ];
+
+        context.textAlign =
+            'right';
+
+        context.fillText(
+            sideNames[
+                sideIndex % 4
+            ],
+            canvas.width -
+            COMPILED_CITY_TEXT_BORDER_RIGHT -
+            18,
+            COMPILED_CITY_TEXT_BORDER_TOP / 2
+        );
+
+        context.textAlign =
+            'left';
+
+        /*
+         * Bottom structural label.
+         */
+
+        context.fillStyle =
+            '#65707d';
+
+        context.textAlign = 'center';
+
+        context.textBaseline = 'middle';
+
+        context.font =
+            'bold 16px Arial';
+
+        context.fillStyle =
+            '#ffffff';
+
+        context.fillText(
+            'Ehtesham K . Absolute Motivation',
+            canvas.width / 2,
+            canvas.height -
+            COMPILED_CITY_TEXT_BORDER_BOTTOM / 2
+        );
+
+        context.textAlign = 'left';
+
+        canvas.userData =
+            canvas.userData || {};
+
+        canvas.userData.drawNewsreel =
+            drawNewsreel;
+
+        canvas.userData.sectionIndex =
+            sectionIndex;
+
+        canvas.userData.sideIndex =
+            sideIndex;
+
+        canvas.userData.lineCount =
+            lines.length;
+
+        canvas.userData.visibleLines =
+            COMPILED_CITY_TEXT_VISIBLE_LINES;
+    }
+
+    /*
+     * Initial frame.
+     */
+
+    drawNewsreel(
+        performance.now()
+    );
+
+    /*
+     * Create the actual Three.js texture from the
+     * HTML canvas used by the scrolling display.
+     *
+     * This was previously missing, while the facade
+     * material expected display.texture.
+     */
+    texture =
+        new THREE.CanvasTexture(
+            canvas
+        );
+
+    texture.colorSpace =
+        THREE.SRGBColorSpace;
+
+    texture.needsUpdate =
+        true;
+
+    return {
+        canvas,
+        context,
+        texture,
+        drawNewsreel
+    };
+}
+
+// ============================================================
+// BUILDING MATERIAL
+// ============================================================
+
+function compiledCityCreateBuildingMaterial(
+    colorValue
+) {
+
+    return new THREE.MeshStandardMaterial({
+
+        color:
+            colorValue,
+
+        emissive:
+            colorValue,
+
+        emissiveIntensity:
+            0.12,
+
+        roughness:
+            0.72,
+
+        metalness:
+            0.28
+    });
+}
+
+// ============================================================
+// CREATE BUILDINGS
+// ============================================================
+
+function compiledCityCreateBuildings() {
+
+    if (
+        !compiledCitySections ||
+        compiledCitySections.length === 0
+    ) {
+        return;
+    }
+
+    /*
+     * ========================================================
+     * COMPACT BUILDING DIMENSIONS
+     * ========================================================
+     *
+     * The city grid spacing is 22 units.
+     *
+     * Buildings therefore must remain substantially smaller
+     * than one grid cell.
+     *
+     * Intended building dimensions:
+     *
+     *     width  = 9.6
+     *     depth  = 9.6
+     *     height = 23.1
+     *
+     * The old instanced implementation incorrectly created:
+     *
+     *     684 x 352 x 684
+     *
+     * and then used instance scale 1,1,1.
+     *
+     * That caused the buildings to overlap enormous portions
+     * of the city and made them appear as one giant object.
+     */
+
+    const buildingWidth =
+        9.6;
+
+    const buildingDepth =
+        9.6;
+
+    const buildingHeight =
+        23.1;
+
+    /*
+     * ========================================================
+     * ONE UNIT SHARED GEOMETRY
+     * ========================================================
+     *
+     * Every instance receives its real dimensions through
+     * its instance matrix.
+     *
+     * This keeps ONE geometry shared by all 4,809 buildings.
+     */
+
+    const sharedBuildingGeometry =
+        new THREE.BoxGeometry(
+            1,
+            1,
+            1
+        );
+
+    const sharedBuildingMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x20252b,
+            roughness: 0.78,
+            metalness: 0.08
+        });
+
+    const totalBuildings =
+        compiledCitySections.length;
+
+    const instancedBuildings =
+        new THREE.InstancedMesh(
+            sharedBuildingGeometry,
+            sharedBuildingMaterial,
+            totalBuildings
+        );
+
+    instancedBuildings.name =
+        "CompiledCityBuildingsInstanced";
+
+    const dummy =
+        new THREE.Object3D();
+
+    compiledCityBuildings = [];
+
+    for (
+        let index = 0;
+        index < totalBuildings;
+        index++
+    ) {
+
+        /*
+         * ====================================================
+         * GRID POSITION
+         * ====================================================
+         */
+
+        const column =
+            index %
+            COMPILED_CITY_GRID_COLUMNS;
+
+        const row =
+            Math.floor(
+                index /
+                COMPILED_CITY_GRID_COLUMNS
+            );
+
+        const x =
+            (
+                column -
+                (COMPILED_CITY_GRID_COLUMNS - 1) / 2
+            ) *
+            COMPILED_CITY_GRID_SPACING;
+
+        const z =
+            (
+                row -
+                Math.floor(
+                    totalBuildings /
+                    COMPILED_CITY_GRID_COLUMNS
+                ) / 2
+            ) *
+            COMPILED_CITY_GRID_SPACING;
+
+        /*
+         * ====================================================
+         * INSTANCE TRANSFORM
+         * ====================================================
+         *
+         * BoxGeometry is centered around its origin.
+         *
+         * Scaling:
+         *
+         *     X = 9.6
+         *     Y = 23.1
+         *     Z = 9.6
+         *
+         * Translation:
+         *
+         *     X = building center
+         *     Y = half building height
+         *     Z = building center
+         *
+         * Therefore the building bottom remains exactly at
+         * world Y = 0.
+         */
+
+        dummy.position.set(
+            x,
+            buildingHeight / 2,
+            z
+        );
+
+        dummy.rotation.set(
+            0,
+            0,
+            0
+        );
+
+        dummy.scale.set(
+            buildingWidth,
+            buildingHeight,
+            buildingDepth
+        );
+
+        dummy.updateMatrix();
+
+        instancedBuildings.setMatrixAt(
+            index,
+            dummy.matrix
+        );
+
+        /*
+         * ====================================================
+         * BUILDING ANCHOR
+         * ====================================================
+         *
+         * Keep the existing anchor architecture intact.
+         *
+         * Facades are attached to these anchors rather than
+         * directly to the InstancedMesh.
+         */
+
+        const anchor =
+            new THREE.Group();
+
+        anchor.position.set(
+            x,
+            0,
+            z
+        );
+
+        scene.add(
+            anchor
+        );
+
+        /*
+         * ====================================================
+         * BUILDING RECORD
+         * ====================================================
+         *
+         * IMPORTANT:
+         *
+         * width/depth/height exactly match the rendered
+         * instance dimensions.
+         *
+         * Collision uses these values.
+         *
+         * Facade placement also uses these values.
+         */
+
+        const building = {
+            index,
+            instanceId: index,
+
+            x,
+            y: 0,
+            z,
+
+            mesh:
+                instancedBuildings,
+
+            anchor,
+
+            width:
+                buildingWidth,
+
+            depth:
+                buildingDepth,
+
+            height:
+                buildingHeight,
+
+            facade:
+                null,
+
+            facades:
+                [],
+
+            texture:
+                null,
+
+            canvas:
+                null,
+
+            context:
+                null,
+
+            material:
+                sharedBuildingMaterial,
+
+            geometry:
+                sharedBuildingGeometry,
+
+            facadeMaterials:
+                [],
+
+            facadeTextures:
+                [],
+
+            facadeCanvases:
+                [],
+
+            facadeContexts:
+                [],
+
+            facadeGeometries:
+                []
+        };
+
+        compiledCityBuildings.push(
+            building
+        );
+    }
+
+    /*
+     * Tell Three.js that all instance transforms are ready.
+     */
+
+    instancedBuildings.instanceMatrix.needsUpdate =
+        true;
+
+    /*
+     * Rebuild the InstancedMesh bounds from the actual
+     * transformed instances.
+     */
+
+    instancedBuildings.computeBoundingBox();
+    instancedBuildings.computeBoundingSphere();
+
+    /*
+     * Add exactly one shared building mesh to the scene.
+     */
+
+    
+scene.add(
+        instancedBuildings
+    );
+
+
+
+    
+
+
+    threeSunlightCreateCinematicGroundAndMaterials();
+threeSunlightCreateSceneBoundary();
+}
+
+// ============================================================
+// FIND CLOSEST BUILDING SIDE
+// ============================================================
+
+function compiledCityGetNearestFacade(
+    building
+) {
+
+    const localX =
+        camera.position.x -
+        building.x;
+
+    const localZ =
+        camera.position.z -
+        building.z;
+
+    const absX =
+        Math.abs(localX);
+
+    const absZ =
+        Math.abs(localZ);
+
+    if (
+        absX > absZ
+    ) {
+
+        if (
+            localX >= 0
+        ) {
+
+            return 'right';
+        }
+
+        return 'left';
+    }
+
+    if (
+        localZ >= 0
+    ) {
+
+        return 'back';
+    }
+
+    return 'front';
+}
+
+// ============================================================
+// PLACE PANEL ON REAL BUILDING SURFACE
+// ============================================================
+
+function compiledCityPlaceFacade(
+    facade,
+    building,
+    facadeName
+) {
+
+    const panelWidth =
+        Math.max(
+            building.width * 0.82,
+            8
+        );
+
+    const panelHeight =
+        Math.max(
+            Math.min(
+                building.height * 0.46,
+                28
+            ),
+            7
+        );
+
+    facade.scale.set(
+        panelWidth,
+        panelHeight,
+        1
+    );
+
+    const tinyGap =
+        0.08;
+
+    if (
+        facadeName === 'front'
+    ) {
+
+        facade.position.set(
+            0,
+            building.height * 0.58,
+            -(
+                building.depth / 2
+            ) - tinyGap
+        );
+
+        facade.rotation.set(
+            0,
+            0,
+            0
+        );
+    }
+
+    else if (
+        facadeName === 'back'
+    ) {
+
+        facade.position.set(
+            0,
+            building.height * 0.58,
+            (
+                building.depth / 2
+            ) + tinyGap
+        );
+
+        facade.rotation.set(
+            0,
+            Math.PI,
+            0
+        );
+    }
+
+    else if (
+        facadeName === 'left'
+    ) {
+
+        facade.position.set(
+            -(
+                building.width / 2
+            ) - tinyGap,
+            building.height * 0.58,
+            0
+        );
+
+        facade.rotation.set(
+            0,
+            -Math.PI / 2,
+            0
+        );
+    }
+
+    else if (
+        facadeName === 'right'
+    ) {
+
+        facade.position.set(
+            (
+                building.width / 2
+            ) + tinyGap,
+            building.height * 0.58,
+            0
+        );
+
+        facade.rotation.set(
+            0,
+            Math.PI / 2,
+            0
+        );
+    }
+
+    facade.userData.facadeName =
+        facadeName;
+}
+
+// ============================================================
+// ACTIVATE UNIQUE DISPLAY
+// ============================================================
+
+/* ============================================================
+   FIXED FOUR-SIDED NEWSREEL ANIMATION
+   ============================================================ */
+
+function compiledCityStartNewsreelAnimation() {
+
+    if (
+        compiledCityNewsreelStarted
+    ) {
+
+        return;
+    }
+
+    compiledCityNewsreelStarted =
+        true;
+
+    const tick =
+        (
+            timestamp
+        ) => {
+
+            if (
+                typeof compiledCityActiveFacades !==
+                'undefined'
+            ) {
+
+                compiledCityActiveFacades.forEach(
+                    (
+                        active
+                    ) => {
+
+                        if (
+                            !active ||
+                            !active.canvases
+                        ) {
+
+                            return;
+                        }
+
+                        active.canvases.forEach(
+                            (
+                                canvas
+                            ) => {
+
+                                if (
+                                    canvas &&
+                                    canvas.userData &&
+                                    typeof canvas.userData.drawNewsreel ===
+                                        'function'
+                                ) {
+
+                                    canvas.userData.drawNewsreel(
+                                        timestamp
+                                    );
+                                }
+                            }
+                        );
+                    }
+                );
+            }
+
+            requestAnimationFrame(
+                tick
+            );
+        };
+
+    requestAnimationFrame(
+        tick
+    );
+}
+function compiledCityActivateFacade(
+    building
+) {
+
+    if (
+        compiledCityActiveFacades.has(
+            building.index
+        )
+    ) {
+
+        return;
+    }
+
+    const sectionText =
+        compiledCitySections[
+            building.index
+        ];
+
+    if (
+        !sectionText
+    ) {
+
+        return;
+    }
+
+    // ========================================================
+    // FOUR SIDES
+    // ========================================================
+
+    const sideNames =
+        [
+            'front',
+            'back',
+            'left',
+            'right'
+        ];
+
+    const facades =
+        [];
+
+    const displays =
+        [];
+
+    const materials =
+        [];
+
+    const geometries =
+        [];
+
+    for (
+        let sideIndex = 0;
+        sideIndex < 4;
+        sideIndex++
+    ) {
+
+        // ====================================================
+        // SAME CANVAS SIZE ON EVERY SIDE
+        // ====================================================
+
+        const display =
+            compiledCityCreateUniqueDisplay(
+                building.index,
+                sectionText,
+                sideIndex
+            );
+
+        const material =
+            new THREE.MeshBasicMaterial({
+
+                map:
+                    display.texture,
+
+                color:
+                    0xffffff,
+
+                transparent:
+                    false,
+
+                opacity:
+                    1,
+
+                depthWrite:
+                    false,
+
+                depthTest:
+                    true,
+
+                toneMapped:
+                    false,
+
+                side:
+                    THREE.FrontSide
+            });
+
+        // ====================================================
+        // FIXED DISPLAY GEOMETRY
+        //
+        // NEVER based on section length.
+        // ====================================================
+
+        const geometry =
+            new THREE.PlaneGeometry(
+                1,
+                1
+            );
+
+        const facade =
+            new THREE.Mesh(
+                geometry,
+                material
+            );
+
+        facade.name =
+            `CompiledCityFacade_${building.index}_${sideNames[sideIndex]}`;
+
+        facade.renderOrder =
+            1000;
+        building.anchor.add(
+            facade
+        );
+
+        // ====================================================
+        // EXISTING CITY PLACEMENT SYSTEM
+        // ====================================================
+
+        compiledCityPlaceFacade(
+            facade,
+            building,
+            sideNames[sideIndex]
+        );
+
+        facade.userData.buildingIndex =
+            building.index;
+
+        facade.userData.facadeSide =
+            sideNames[sideIndex];
+
+        facade.userData.sectionText =
+            sectionText;
+
+        facade.userData.uniqueDisplay =
+            true;
+
+        facade.userData.uniqueTexture =
+            display.texture;
+
+        facade.userData.canvas =
+            display.canvas;
+
+        facade.userData.context =
+            display.context;
+
+        facades.push(
+            facade
+        );
+
+        displays.push(
+            display
+        );
+
+        materials.push(
+            material
+        );
+
+        geometries.push(
+            geometry
+        );
+    }
+
+    // ========================================================
+    // ACTIVE RECORD
+    //
+    // Keep singular fields for compatibility with the
+    // existing cleanup code, while also retaining all four.
+    // ========================================================
+
+    compiledCityActiveFacades.set(
+        building.index,
+        {
+            building:
+                building,
+
+            facade:
+                facades[0],
+
+            facades:
+                facades,
+
+            texture:
+                displays[0].texture,
+
+            textures:
+                displays.map(
+                    display =>
+                        display.texture
+                ),
+
+            canvas:
+                displays[0].canvas,
+
+            canvases:
+                displays.map(
+                    display =>
+                        display.canvas
+                ),
+
+            context:
+                displays[0].context,
+
+            contexts:
+                displays.map(
+                    display =>
+                        display.context
+                ),
+
+            material:
+                materials[0],
+
+            materials:
+                materials,
+
+            geometry:
+                geometries[0],
+
+            geometries:
+                geometries,
+
+            facadeName:
+                'four-sided'
+        }
+    );
+
+    console.log(
+        `[Compiled City] FIXED FOUR-SIDED NEWSREEL -> Section ${building.index + 1}`
+    );
+}
+
+// ============================================================
+// DEACTIVATE DISPLAY
+// ============================================================
+
+function compiledCityDeactivateFacade(
+    buildingIndex
+) {
+
+    const active =
+        compiledCityActiveFacades.get(
+            buildingIndex
+        );
+
+    if (
+        !active
+    ) {
+
+        return;
+    }
+
+    const facade =
+        active.facade;
+
+    if (
+        facade.parent
+    ) {
+
+        facade.parent.remove(
+            facade
+        );
+    }
+
+    if (
+        active.geometry
+    ) {
+
+        active.geometry.dispose();
+    }
+
+    if (
+        active.material
+    ) {
+
+        if (
+            active.material.map
+        ) {
+
+            active.material.map.dispose();
+        }
+
+        active.material.dispose();
+    }
+
+    compiledCityActiveFacades.delete(
+        buildingIndex
+    );
+}
+
+// ============================================================
+// LAZY LOADING
+// ============================================================
+
+function compiledCityUpdateFacades(
+    force = false
+) {
+
+    if (
+        !compiledCityDataReady
+    ) {
+        return;
+    }
+
+    const now =
+        performance.now();
+
+    if (
+        !force &&
+        (
+            now -
+            compiledCityLastUpdate
+        ) < 150
+    ) {
+        return;
+    }
+
+    compiledCityLastUpdate =
+        now;
+
+    /*
+     * ========================================================
+     * GRID-AWARE SEARCH
+     * ========================================================
+     *
+     * The city is a regular grid.
+     *
+     * There is no reason to calculate and sort the distance
+     * to all 4,809 buildings every update.
+     *
+     * We calculate the camera's grid cell and inspect only
+     * nearby cells.
+     */
+
+    const columns =
+        COMPILED_CITY_GRID_COLUMNS;
+
+    const spacing =
+        COMPILED_CITY_GRID_SPACING;
+
+    const totalBuildings =
+        compiledCityBuildings.length;
+
+    const totalRows =
+        Math.ceil(
+            totalBuildings /
+            columns
+        );
+
+    const column =
+        Math.round(
+            (
+                camera.position.x /
+                spacing
+            ) +
+            (
+                columns - 1
+            ) / 2
+        );
+
+    const row =
+        Math.round(
+            (
+                camera.position.z /
+                spacing
+            ) +
+            Math.floor(
+                totalBuildings /
+                columns
+            ) / 2
+        );
+
+    /*
+     * The active radius is 220.
+     *
+     * At 22 units of grid spacing, this is roughly
+     * ten cells in every direction.
+     *
+     * We use a small safety margin so buildings near
+     * the edge of the active radius are not missed.
+     */
+    const cellRadius =
+        Math.ceil(
+            COMPILED_CITY_ACTIVE_RADIUS /
+            spacing
+        ) + 1;
+
+    const minColumn =
+        Math.max(
+            0,
+            column -
+            cellRadius
+        );
+
+    const maxColumn =
+        Math.min(
+            columns - 1,
+            column +
+            cellRadius
+        );
+
+    const minRow =
+        Math.max(
+            0,
+            row -
+            cellRadius
+        );
+
+    const maxRow =
+        Math.min(
+            totalRows - 1,
+            row +
+            cellRadius
+        );
+
+    /*
+     * Only nearby buildings become candidates.
+     */
+    const candidates = [];
+
+    for (
+        let candidateRow = minRow;
+        candidateRow <= maxRow;
+        candidateRow++
+    ) {
+
+        for (
+            let candidateColumn = minColumn;
+            candidateColumn <= maxColumn;
+            candidateColumn++
+        ) {
+
+            const index =
+                candidateRow *
+                columns +
+                candidateColumn;
+
+            if (
+                index < 0 ||
+                index >= totalBuildings
+            ) {
+                continue;
+            }
+
+            const building =
+                compiledCityBuildings[index];
+
+            if (
+                !building
+            ) {
+                continue;
+            }
+
+            const dx =
+                camera.position.x -
+                building.x;
+
+            const dz =
+                camera.position.z -
+                building.z;
+
+            const distanceSquared =
+                (
+                    dx * dx
+                ) +
+                (
+                    dz * dz
+                );
+
+            if (
+                distanceSquared <=
+                (
+                    COMPILED_CITY_ACTIVE_RADIUS *
+                    COMPILED_CITY_ACTIVE_RADIUS
+                )
+            ) {
+
+                candidates.push({
+                    building,
+                    distanceSquared
+                });
+            }
+        }
+    }
+
+    /*
+     * Sort only the nearby candidates.
+     *
+     * This is dramatically cheaper than sorting all
+     * 4,809 buildings.
+     */
+    candidates.sort(
+        (
+            a,
+            b
+        ) =>
+            a.distanceSquared -
+            b.distanceSquared
+    );
+
+    /*
+     * Desired buildings.
+     *
+     * Preserve the existing configured maximum.
+     */
+    const desired =
+        new Set();
+
+    for (
+        const candidate
+        of candidates
+    ) {
+
+        if (
+            desired.size >=
+            COMPILED_CITY_MAX_ACTIVE_FACADES
+        ) {
+            break;
+        }
+
+        desired.add(
+            candidate.building.index
+        );
+    }
+
+    /*
+     * Activate only buildings that are actually desired.
+     */
+    for (
+        const index
+        of desired
+    ) {
+
+        if (
+            !compiledCityActiveFacades.has(
+                index
+            )
+        ) {
+
+            const building =
+                compiledCityBuildings[
+                    index
+                ];
+
+            compiledCityActivateFacade(
+                building
+            );
+        }
+    }
+
+    /*
+     * Release buildings that have moved outside the
+     * release radius.
+     */
+    const releaseRadiusSquared =
+        COMPILED_CITY_RELEASE_RADIUS *
+        COMPILED_CITY_RELEASE_RADIUS;
+
+    for (
+        const [
+            index,
+            active
+        ]
+        of compiledCityActiveFacades
+    ) {
+
+        const building =
+            active.building;
+
+        const dx =
+            camera.position.x -
+            building.x;
+
+        const dz =
+            camera.position.z -
+            building.z;
+
+        const distanceSquared =
+            (
+                dx * dx
+            ) +
+            (
+                dz * dz
+            );
+
+        if (
+            distanceSquared >
+            releaseRadiusSquared
+        ) {
+
+            compiledCityDeactivateFacade(
+                index
+            );
+        }
+    }
+}
+// ============================================================
+// CHANGE ACTIVE FACADE SIDE
+// ============================================================
+
+function compiledCityUpdateFacadeSides() {
+
+    if (
+        !compiledCityDataReady
+    ) {
+
+        return;
+    }
+
+    const now =
+        performance.now();
+
+    if (
+        (
+            now -
+            compiledCityLastSideUpdate
+        ) < 250
+    ) {
+
+        return;
+    }
+
+    compiledCityLastSideUpdate =
+        now;
+
+    for (
+        const [
+            index,
+            active
+        ]
+        of compiledCityActiveFacades
+    ) {
+
+        const building =
+            active.building;
+
+        const desiredFacade =
+            compiledCityGetNearestFacade(
+                building
+            );
+
+        if (
+            desiredFacade !==
+            active.facadeName
+        ) {
+
+            active.facadeName =
+                desiredFacade;
+
+            compiledCityPlaceFacade(
+                active.facade,
+                building,
+                desiredFacade
+            );
+        }
+    }
+}
+
+// ============================================================
+// LOAD DATA
+// ============================================================
+
+async function compiledCityLoadData() {
+
+    const response =
+        await fetch(
+            COMPILED_CITY_DATA_URL,
+            {
+                cache:
+                    'no-store'
+            }
+        );
+
+    if (
+        !response.ok
+    ) {
+
+        throw new Error(
+            `Unable to load ${COMPILED_CITY_DATA_URL}: ${response.status}`
+        );
+    }
+
+    const data =
+        await response.json();
+
+    compiledCitySections =
+        Array.isArray(data)
+            ? data.map(
+                item =>
+                    typeof item === 'string'
+                        ? item
+                        : item.text
+            )
+            : [];
+
+    console.log(
+        `[Compiled City] Sections loaded: ${compiledCitySections.length}`
+    );
+
+    compiledCityCreateBuildings();
+
+    compiledCityStartNewsreelAnimation();
+
+    compiledCityDataReady =
+        true;
+
+    compiledCityUpdateFacades(
+        true
+    );
+
+    console.log(
+        `[Compiled City] Active facades: ${compiledCityActiveFacades.size}`
+    );
+}
+
+// ============================================================
+// DEBUG API
+// ============================================================
+
+window.compiledCityDebug = {
+    inspectBuilding(index = 0) {
+        const building =
+            compiledCityBuildings[index];
+
+        if (!building) {
+            return {
+                error: `Building ${index} does not exist.`,
+                buildingCount: compiledCityBuildings.length
+            };
+        }
+
+        const mesh =
+            building.mesh;
+
+        const geometry =
+            mesh?.geometry;
+
+        const material =
+            mesh?.material;
+
+        return {
+            index: building.index,
+
+            position: {
+                x: building.x,
+                y: building.y,
+                z: building.z
+            },
+
+            dimensions: {
+                width: building.width,
+                depth: building.depth,
+                height: building.height
+            },
+
+            buildingKeys:
+                Object.keys(building),
+
+            mesh: {
+                exists: !!mesh,
+                type: mesh?.type ?? null,
+                uuid: mesh?.uuid ?? null,
+                visible: mesh?.visible ?? null,
+                position: mesh
+                    ? {
+                        x: mesh.position.x,
+                        y: mesh.position.y,
+                        z: mesh.position.z
+                    }
+                    : null
+            },
+
+            geometry: {
+                exists: !!geometry,
+                type: geometry?.type ?? null,
+                uuid: geometry?.uuid ?? null,
+                attributes: geometry
+                    ? Object.keys(geometry.attributes)
+                    : [],
+                indexCount: geometry?.index
+                    ? geometry.index.count
+                    : 0
+            },
+
+            material: {
+                exists: !!material,
+                type: material?.type ?? null,
+                uuid: material?.uuid ?? null,
+                color: material?.color
+                    ? material.color.getHex()
+                    : null,
+                roughness: material?.roughness ?? null,
+                metalness: material?.metalness ?? null
+            },
+
+            anchor: {
+                exists: !!building.anchor,
+                type: building.anchor?.type ?? null,
+                uuid: building.anchor?.uuid ?? null,
+                children:
+                    building.anchor?.children?.length ?? 0
+            },
+
+            facades: {
+                facadeCount:
+                    building.facades?.length ?? 0,
+
+                materialCount:
+                    building.facadeMaterials?.length ?? 0,
+
+                textureCount:
+                    building.facadeTextures?.length ?? 0,
+
+                canvasCount:
+                    building.facadeCanvases?.length ?? 0,
+
+                contextCount:
+                    building.facadeContexts?.length ?? 0,
+
+                geometryCount:
+                    building.facadeGeometries?.length ?? 0
+            }
+        };
+    },
+
+    inspectBuildingSharing(sampleCount = 10) {
+        const count =
+            Math.min(
+                Math.max(1, sampleCount),
+                compiledCityBuildings.length
+            );
+
+        const samples = [];
+
+        for (let index = 0; index < count; index++) {
+            const building =
+                compiledCityBuildings[index];
+
+            samples.push({
+                index: building.index,
+
+                meshUUID:
+                    building.mesh?.uuid ?? null,
+
+                geometryUUID:
+                    building.mesh?.geometry?.uuid ?? null,
+
+                materialUUID:
+                    building.mesh?.material?.uuid ?? null,
+
+                anchorUUID:
+                    building.anchor?.uuid ?? null,
+
+                facadeCount:
+                    building.facades?.length ?? 0,
+
+                facadeGeometryCount:
+                    building.facadeGeometries?.length ?? 0,
+
+                facadeMaterialCount:
+                    building.facadeMaterials?.length ?? 0,
+
+                facadeTextureCount:
+                    building.facadeTextures?.length ?? 0
+            });
+        }
+
+        const geometryUUIDs =
+            new Set(
+                samples
+                    .map(item => item.geometryUUID)
+                    .filter(Boolean)
+            );
+
+        const materialUUIDs =
+            new Set(
+                samples
+                    .map(item => item.materialUUID)
+                    .filter(Boolean)
+            );
+
+        const meshUUIDs =
+            new Set(
+                samples
+                    .map(item => item.meshUUID)
+                    .filter(Boolean)
+            );
+
+        const anchorUUIDs =
+            new Set(
+                samples
+                    .map(item => item.anchorUUID)
+                    .filter(Boolean)
+            );
+
+        return {
+            totalBuildings:
+                compiledCityBuildings.length,
+
+            sampleCount:
+                samples.length,
+
+            uniqueMeshUUIDs:
+                meshUUIDs.size,
+
+            uniqueGeometryUUIDs:
+                geometryUUIDs.size,
+
+            uniqueMaterialUUIDs:
+                materialUUIDs.size,
+
+            uniqueAnchorUUIDs:
+                anchorUUIDs.size,
+
+            samples
+        };
+    },
+
+    sections() {
+
+        return compiledCitySections.length;
+    },
+
+    buildings() {
+
+        return compiledCityBuildings.length;
+    },
+
+    activeFacades() {
+
+        return compiledCityActiveFacades.size;
+    },
+
+    uniqueTextures() {
+
+        const textures =
+            new Set();
+
+        for (
+            const active
+            of compiledCityActiveFacades.values()
+        ) {
+
+            textures.add(
+                active.texture.uuid
+            );
+        }
+
+        return textures.size;
+    },
+
+    activeSectionNumbers() {
+
+        return Array.from(
+            compiledCityActiveFacades.keys()
+        )
+            .sort(
+                (
+                    a,
+                    b
+                ) =>
+                    a - b
+            )
+            .map(
+                index =>
+                    index + 1
+            );
+    },
+
+    section(index) {
+
+        return compiledCitySections[
+            index
+        ];
+    },
+
+    building(index) {
+
+        return compiledCityBuildings[
+            index
+        ];
+    },
+
+    facadeInfo(index) {
+
+        const active =
+            compiledCityActiveFacades.get(
+                index
+            );
+
+        if (
+            !active
+        ) {
+
+            return null;
+        }
+
+        return {
+
+            buildingIndex:
+                index,
+
+            sectionNumber:
+                index + 1,
+
+            facade:
+                active.facadeName,
+
+            textureUUID:
+                active.texture.uuid,
+
+            textureIsUnique:
+                true,
+
+            attachedToBuildingAnchor:
+                active.facade.parent ===
+                active.building.anchor,
+
+            position: {
+
+                x:
+                    active.facade.position.x,
+
+                y:
+                    active.facade.position.y,
+
+                z:
+                    active.facade.position.z
+            }
+        };
+    },
+
+    config() {
+
+        return {
+
+            activeRadius:
+                COMPILED_CITY_ACTIVE_RADIUS,
+
+            releaseRadius:
+                COMPILED_CITY_RELEASE_RADIUS,
+
+            maxActiveFacades:
+                COMPILED_CITY_MAX_ACTIVE_FACADES
+        };
+    },
+    rendererInfo() {
+        return {
+            render: {
+                calls: renderer.info.render.calls,
+                triangles: renderer.info.render.triangles,
+                points: renderer.info.render.points,
+                lines: renderer.info.render.lines
+            },
+            memory: {
+                geometries: renderer.info.memory.geometries,
+                textures: renderer.info.memory.textures
+            },
+            programs: renderer.info.programs
+                ? renderer.info.programs.length
+                : null
+        };
+    },
+
+    sceneChildren() {
+        return scene.children.length;
+    },
+    inspectSceneObjects() {
+        const objects = [];
+
+        scene.children.forEach(
+            (object, index) => {
+                const geometry =
+                    object.geometry ?? null;
+
+                const material =
+                    object.material ?? null;
+
+                let dimensions = null;
+
+                if (geometry) {
+                    if (!geometry.boundingBox) {
+                        geometry.computeBoundingBox();
+                    }
+
+                    const box =
+                        geometry.boundingBox;
+
+                    if (box) {
+                        dimensions = {
+                            width:
+                                box.max.x -
+                                box.min.x,
+
+                            height:
+                                box.max.y -
+                                box.min.y,
+
+                            depth:
+                                box.max.z -
+                                box.min.z
+                        };
+                    }
+                }
+
+                let materialInfo = null;
+
+                if (Array.isArray(material)) {
+                    materialInfo =
+                        material.map(
+                            item => ({
+                                type:
+                                    item?.type ??
+                                    null,
+
+                                uuid:
+                                    item?.uuid ??
+                                    null,
+
+                                color:
+                                    item?.color
+                                        ? item.color.getHex()
+                                        : null,
+
+                                roughness:
+                                    item?.roughness ??
+                                    null,
+
+                                metalness:
+                                    item?.metalness ??
+                                    null,
+
+                                opacity:
+                                    item?.opacity ??
+                                    null,
+
+                                transparent:
+                                    item?.transparent ??
+                                    null
+                            })
+                        );
+                } else {
+                    materialInfo = {
+                        type:
+                            material?.type ??
+                            null,
+
+                        uuid:
+                            material?.uuid ??
+                            null,
+
+                        color:
+                            material?.color
+                                ? material.color.getHex()
+                                : null,
+
+                        roughness:
+                            material?.roughness ??
+                            null,
+
+                        metalness:
+                            material?.metalness ??
+                            null,
+
+                        opacity:
+                            material?.opacity ??
+                            null,
+
+                        transparent:
+                            material?.transparent ??
+                            null
+                    };
+                }
+
+                objects.push({
+                    sceneIndex:
+                        index,
+
+                    name:
+                        object.name ||
+                        "",
+
+                    type:
+                        object.type,
+
+                    uuid:
+                        object.uuid,
+
+                    visible:
+                        object.visible,
+
+                    position: {
+                        x:
+                            object.position.x,
+
+                        y:
+                            object.position.y,
+
+                        z:
+                            object.position.z
+                    },
+
+                    rotation: {
+                        x:
+                            object.rotation.x,
+
+                        y:
+                            object.rotation.y,
+
+                        z:
+                            object.rotation.z
+                    },
+
+                    scale: {
+                        x:
+                            object.scale.x,
+
+                        y:
+                            object.scale.y,
+
+                        z:
+                            object.scale.z
+                    },
+
+                    geometry: {
+                        exists:
+                            !!geometry,
+
+                        type:
+                            geometry?.type ??
+                            null,
+
+                        uuid:
+                            geometry?.uuid ??
+                            null
+                    },
+
+                    material:
+                        materialInfo,
+
+                    dimensions,
+
+                    children:
+                        object.children?.length ??
+                        0,
+
+                    userDataKeys:
+                        Object.keys(
+                            object.userData ?? {}
+                        )
+                });
+            }
+        );
+
+        return {
+            sceneChildren:
+                scene.children.length,
+
+            topLevelObjects:
+                objects.length,
+
+            objects
+        };
+    },
+
+    cameraPosition() {
+        return {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z
+        };
+    },
+
+    cameraDirection() {
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+
+        return {
+            x: direction.x,
+            y: direction.y,
+            z: direction.z
+        };
+    },
+
+    controlsInfo() {
+        return {
+            type: controls?.constructor?.name ?? null,
+            movementSpeed: controls?.movementSpeed ?? null,
+            lookSpeed: controls?.lookSpeed ?? null,
+            enabled: controls?.enabled ?? null
+        };
+    },
+
+    setControlsEnabled(enabled) {
+        controls.enabled = Boolean(enabled);
+
+        return {
+            enabled: controls.enabled
+        };
+    },
+
+    inspectControls() {
+        return {
+            keys: Object.keys(controls),
+            values: Object.fromEntries(
+                Object.keys(controls)
+                    .filter(key => {
+                        const value = controls[key];
+                        return (
+                            typeof value === "number" ||
+                            typeof value === "boolean" ||
+                            typeof value === "string"
+                        );
+                    })
+                    .map(key => [key, controls[key]])
+            )
+        };
+    },
+
+    lookAtBuilding(index) {
+        const building = compiledCityBuildings[index];
+
+        if (!building) {
+            return {
+                error: "Building not found",
+                index
+            };
+        }
+
+        camera.position.set(60, 8, 0);
+
+        const target = new THREE.Vector3(
+            building.x,
+            building.y,
+            building.z
+        );
+
+        camera.lookAt(target);
+
+        return {
+            index,
+            camera: {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z
+            },
+            target: {
+                x: target.x,
+                y: target.y,
+                z: target.z
+            },
+            distance: camera.position.distanceTo(target)
+        };
+    },
+
+    resetCamera() {
+        camera.position.set(
+            60,
+            8,
+            0
+        );
+
+        camera.lookAt(
+            -60,
+            8,
+            0
+        );
+
+        return {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z
+        };
+    },
+
+    buildingPosition(index) {
+
+        const building =
+            compiledCityBuildings[index];
+
+        if (!building) {
+            return null;
+        }
+
+        const dx =
+            camera.position.x -
+            building.x;
+
+        const dz =
+            camera.position.z -
+            building.z;
+
+        const distanceSquared =
+            (dx * dx) +
+            (dz * dz);
+
+        return {
+
+            index:
+                building.index,
+
+            stored: {
+                x: building.x,
+                y: building.y,
+                z: building.z
+            },
+
+            anchor: {
+                x: building.anchor.position.x,
+                y: building.anchor.position.y,
+                z: building.anchor.position.z
+            },
+
+            camera: {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z
+            },
+
+            distance:
+                Math.sqrt(
+                    distanceSquared
+                ),
+
+            activeRadius:
+                COMPILED_CITY_ACTIVE_RADIUS,
+
+            withinActiveRadius:
+                distanceSquared <=
+                (
+                    COMPILED_CITY_ACTIVE_RADIUS *
+                    COMPILED_CITY_ACTIVE_RADIUS
+                )
+        };
+    },
+};
+
+// ============================================================
+// START DATA LOADING
+// ============================================================
+
+compiledCityLoadData()
+    .catch(
+        error => {
+
+            console.error(
+                '[Compiled City] Failed to initialize:',
+                error
+            );
+        }
+    );
+
+// ===== END COMPILED CITY DISPLAY SYSTEM =====
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
