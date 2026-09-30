@@ -30,3 +30,5 @@ pnpm-debug.log*
 
 node_modules/
 dist/
+
+.vs/
